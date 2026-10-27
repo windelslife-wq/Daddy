@@ -8,6 +8,7 @@ import { encrypt, safeParseCredentials } from '../security.js';
 import { PLATFORMS } from '../constants.js';
 import { config, providerStatus } from '../config.js';
 import { graphRequest } from '../publishers/graph.js';
+import { oauth1Fetch } from '../oauth/oauth1.js';
 import { verifyAccountConnection } from '../publishers/index.js';
 import { sendNotification } from '../notifications.js';
 import { logger } from '../logger.js';
@@ -50,7 +51,7 @@ async function ownedAccount(req, id) {
   return account;
 }
 
-async function attemptRemoteRevoke(account) {
+export async function attemptRemoteRevoke(account) {
   let credentials = {};
   try { credentials = safeParseCredentials(account.credentials); } catch { return { revoked: false, reason: 'Stored credentials could not be read.' }; }
   try {
@@ -68,11 +69,23 @@ async function attemptRemoteRevoke(account) {
         return { revoked: true, provider: 'meta' };
       }
     }
+    if (account.platform === 'x') {
+      const token = credentials.oauthToken;
+      const secret = credentials.oauthTokenSecret;
+      if (token && secret) {
+        await oauth1Fetch(`${config.externalApis.xOAuth}/1.1/oauth/invalidate_token.json`, {
+          method: 'POST',
+          token: { key: token, secret },
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        });
+        return { revoked: true, provider: 'x' };
+      }
+    }
   } catch (error) {
     logger.warn({ error: error.message, accountId: account.id }, 'Provider-side revoke failed; local tokens were still removed');
     return { revoked: false, reason: error.message };
   }
-  return { revoked: false, reason: 'This provider has no revoke endpoint in the current integration.' };
+  return { revoked: false, reason: 'Stored credentials are missing or this provider has no remote revoke endpoint.' };
 }
 
 export function accountsRouter() {

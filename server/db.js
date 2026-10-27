@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { config } from './config.js';
 import { hashPassword, encrypt } from './security.js';
 import { logger } from './logger.js';
+import { deliverNotificationWebhook } from './services/notificationWebhook.js';
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
@@ -496,11 +497,8 @@ export async function notify(userId, { type, title, body, actionUrl = null, meta
     metadata: json(metadata), created_at: now(),
   });
   if (config.notifications.webhookUrl) {
-    fetch(config.notifications.webhookUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id, userId, type, title, body, actionUrl, metadata, createdAt: now() }),
-    }).catch((error) => logger.warn({ error: error.message }, 'Notification webhook failed'));
+    const payload = { id, userId, type, title, body, actionUrl, metadata, createdAt: now() };
+    deliverNotificationWebhook(payload).catch((error) => logger.warn({ error: error.message }, 'Notification webhook failed'));
   }
   return id;
 }

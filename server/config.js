@@ -201,7 +201,7 @@ export function providerStatus() {
       x: { configured: configured.x, mode: 'official-oauth', label: 'X' },
     },
     billing: { stripeConfigured: configured.stripe },
-    notifications: { smtpConfigured: configured.smtp, webhookConfigured: Boolean(config.notifications.webhookUrl) },
+    notifications: { smtpConfigured: configured.smtp, webhookConfigured: Boolean(config.notifications.webhookUrl), webhookSigned: Boolean(config.notifications.webhookSecret) },
     seedDemo: config.seedDemo,
     demoCredentials: config.seedDemo
       ? { email: config.demoEmail, password: config.isProduction && !envBool('EXPOSE_DEMO_CREDENTIALS', false) ? null : config.demoPassword }
@@ -217,6 +217,10 @@ export function assertProductionSecrets() {
   if (config.adminEmail && !config.adminPassword) errors.push('ADMIN_PASSWORD is required when ADMIN_EMAIL is set.');
   for (const [name, url] of Object.entries(config.externalApis)) {
     if (!url.startsWith('https://')) errors.push(`${name} API override must use HTTPS in production.`);
+  }
+  if (config.notifications.webhookUrl) {
+    if (!config.notifications.webhookUrl.startsWith('https://')) errors.push('NOTIFICATION_WEBHOOK_URL must use HTTPS in production.');
+    if (!config.notifications.webhookSecret) errors.push('NOTIFICATION_WEBHOOK_SECRET should be set when NOTIFICATION_WEBHOOK_URL is configured.');
   }
   return errors;
 }
