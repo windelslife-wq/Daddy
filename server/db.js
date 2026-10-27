@@ -39,7 +39,7 @@ export const number = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const tableDefinitions = {
+export const tableDefinitions = {
   users: (t) => {
     t.string('id', 48).primary();
     t.string('email', 320).notNullable().unique();
@@ -317,14 +317,14 @@ const tableDefinitions = {
   },
 };
 
-const defaultPlans = [
+export const defaultPlans = [
   { id: 'free', name: 'Free', price_cents: 0, max_videos_month: 3, max_render_seconds_month: 180, max_posts_month: 9, max_accounts: 1, max_projects: 10, features: ['3 videos / month', 'Local preview renderer', 'Sandbox publisher', 'Manual review'], sort_order: 1 },
   { id: 'starter', name: 'Starter', price_cents: 1900, max_videos_month: 20, max_render_seconds_month: 1200, max_posts_month: 80, max_accounts: 4, max_projects: 100, features: ['20 videos / month', 'All official integrations', 'Scheduling and retries', 'Analytics sync'], sort_order: 2 },
   { id: 'creator', name: 'Creator', price_cents: 4900, max_videos_month: 75, max_render_seconds_month: 5400, max_posts_month: 300, max_accounts: 12, max_projects: 500, features: ['75 videos / month', 'Autopilot schedules', 'Priority render queue', 'AI recommendations'], sort_order: 3 },
   { id: 'scale', name: 'Scale', price_cents: 14900, max_videos_month: 300, max_render_seconds_month: 24000, max_posts_month: 1200, max_accounts: 50, max_projects: 2500, features: ['300 videos / month', 'High concurrency', 'Advanced analytics', 'Bring your own AI keys'], sort_order: 4 },
 ];
 
-const defaultSettings = {
+export const defaultSettings = {
   allow_signups: true,
   maintenance_mode: false,
   default_review_required: true,
@@ -338,27 +338,33 @@ const defaultSettings = {
   supported_platforms: ['sandbox', 'facebook', 'youtube', 'instagram', 'x'],
 };
 
-export async function initDb() {
+export async function initializeDatabase(database, options = {}) {
+  const {
+    seedDemo = config.seedDemo,
+    adminEmail = config.adminEmail,
+    adminPassword = config.adminPassword,
+    log = logger,
+  } = options;
   for (const [name, definition] of Object.entries(tableDefinitions)) {
-    if (!await db.schema.hasTable(name)) {
-      await db.schema.createTable(name, definition);
-      logger.info({ table: name }, 'Created database table');
+    if (!await database.schema.hasTable(name)) {
+      await database.schema.createTable(name, definition);
+      log.info({ table: name }, 'Created database table');
     }
   }
   for (const plan of defaultPlans) {
-    await db('plans').insert({ ...plan, features: json(plan.features), active: true, currency: 'USD', interval: 'month' })
+    await database('plans').insert({ ...plan, features: json(plan.features), active: true, currency: 'USD', interval: 'month' })
       .onConflict('id').ignore();
   }
   for (const [key, value] of Object.entries(defaultSettings)) {
-    await db('settings').insert({ key, value: json(value), updated_at: now(), updated_by: 'system' })
+    await database('settings').insert({ key, value: json(value), updated_at: now(), updated_by: 'system' })
       .onConflict('key').ignore();
   }
-  if (config.seedDemo) {
+  if (seedDemo) {
     const timestamp = now();
-    const demo = await db('users').where({ email: config.demoEmail.toLowerCase() }).first();
+    const demo = await database('users').where({ email: config.demoEmail.toLowerCase() }).first();
     if (!demo) {
       const demoId = newId('usr_');
-      await db('users').insert({
+      await database('users').insert({
         id: demoId,
         email: config.demoEmail.toLowerCase(),
         name: 'Demo Creator',
@@ -369,14 +375,14 @@ export async function initDb() {
         metadata: json({ seeded: true }),
         created_at: timestamp,
       });
-      await db('niches').insert({
+      await database('niches').insert({
         id: newId('nic_'), user_id: demoId, name: 'History Mysteries', slug: 'history-mysteries',
         description: 'Short documentaries about overlooked historical events.',
         config: json({ style: 'cinematic', language: 'en', voice: 'nova', aspectRatio: '9:16', duration: 45, platforms: ['sandbox'] }),
         autopilot: false, review_required: false, posting_limit_per_day: 3, active: true,
         created_at: timestamp, updated_at: timestamp,
       });
-      await db('accounts').insert({
+      await database('accounts').insert({
         id: newId('acc_'), user_id: demoId, platform: 'sandbox', external_id: 'sandbox-demo',
         display_name: 'Sandbox Test Channel', handle: '@sandbox-demo', status: 'connected',
         active: true, automation_enabled: true, credentials: encrypt({ accessToken: 'local-sandbox-token', mode: 'local' }),
@@ -384,22 +390,26 @@ export async function initDb() {
         metadata: json({ seeded: true, note: 'Local HTTP test publisher, not a social network.' }),
         created_at: timestamp, updated_at: timestamp, last_verified_at: timestamp,
       });
-      logger.warn({ email: config.demoEmail }, 'Seeded demo user. Disable SEED_DEMO in production.');
+      log.warn({ email: config.demoEmail }, 'Seeded demo user. Disable SEED_DEMO in production.');
     }
   }
-  if (config.adminEmail && config.adminPassword) {
-    const existing = await db('users').where({ email: config.adminEmail.toLowerCase() }).first();
+  if (adminEmail && adminPassword) {
+    const existing = await database('users').where({ email: adminEmail.toLowerCase() }).first();
     if (!existing) {
-      await db('users').insert({
-        id: newId('usr_'), email: config.adminEmail.toLowerCase(), name: 'Platform Administrator',
-        password_hash: hashPassword(config.adminPassword), role: 'admin', plan_id: 'scale',
+      await database('users').insert({
+        id: newId('usr_'), email: adminEmail.toLowerCase(), name: 'Platform Administrator',
+        password_hash: hashPassword(adminPassword), role: 'admin', plan_id: 'scale',
         status: 'active', metadata: json({ seeded: true }), created_at: now(),
       });
-      logger.warn({ email: config.adminEmail }, 'Seeded administrator. Rotate ADMIN_PASSWORD after first login.');
+      log.warn({ email: adminEmail }, 'Seeded administrator. Rotate ADMIN_PASSWORD after first login.');
     }
   }
-  await db('oauth_states').where('expires_at', '<', now()).del();
-  await db('sessions').where('expires_at', '<', now()).del();
+  await database('oauth_states').where('expires_at', '<', now()).del();
+  await database('sessions').where('expires_at', '<', now()).del();
+}
+
+export async function initDb() {
+  return initializeDatabase(db);
 }
 
 export async function getSetting(key, fallback = null) {
