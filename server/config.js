@@ -1,0 +1,190 @@
+import 'dotenv/config';
+import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+
+const root = path.resolve(process.cwd());
+
+function env(name, fallback = '') {
+  return (process.env[name] ?? fallback).trim();
+}
+function envInt(name, fallback) {
+  const value = Number.parseInt(env(name, String(fallback)), 10);
+  return Number.isFinite(value) ? value : fallback;
+}
+function envBool(name, fallback = false) {
+  const value = env(name, fallback ? 'true' : 'false').toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(value);
+}
+
+const port = envInt('PORT', 8787);
+const dataDir = path.resolve(root, env('DATA_DIR', 'data'));
+const storageDir = path.resolve(root, env('STORAGE_DIR', 'storage'));
+fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(storageDir, { recursive: true });
+
+const databaseUrl = env('DATABASE_URL');
+const isProduction = env('NODE_ENV') === 'production';
+
+// In development we persist an auto-generated local key so encrypted test tokens
+// survive restarts. Production must provide a stable 32-byte key from the secret store.
+const localKeyPath = path.join(dataDir, 'development.key');
+if (!env('APP_ENCRYPTION_KEY') && !isProduction && !fs.existsSync(localKeyPath)) {
+  fs.writeFileSync(localKeyPath, crypto.randomBytes(32).toString('base64'), { mode: 0o600 });
+}
+const encryptionKeyMaterial = env('APP_ENCRYPTION_KEY') ||
+  (!isProduction && fs.existsSync(localKeyPath) ? fs.readFileSync(localKeyPath, 'utf8').trim() : '');
+
+export const config = {
+  root,
+  isProduction,
+  isDev: !isProduction,
+  port,
+  host: env('HOST', '0.0.0.0'),
+  dataDir,
+  storageDir,
+  publicDir: path.join(storageDir, 'public'),
+  dbPath: path.resolve(root, env('SQLITE_PATH', 'data/app.sqlite3')),
+  databaseUrl,
+  appName: env('APP_NAME', 'Faceless Studio'),
+  appUrl: env('APP_URL', `http://localhost:${port}`),
+  publicBaseUrl: env('PUBLIC_BASE_URL', env('APP_URL', `http://localhost:${port}`)).replace(/\/$/, ''),
+  sessionTtlDays: envInt('SESSION_TTL_DAYS', 14),
+  encryptionKeyMaterial,
+  seedDemo: envBool('SEED_DEMO', !isProduction),
+  skipFrontend: envBool('SKIP_FRONTEND', false),
+  demoEmail: env('DEMO_EMAIL', 'creator@faceless.local'),
+  demoPassword: env('DEMO_PASSWORD', 'StudioDemo2026!'),
+  adminEmail: env('ADMIN_EMAIL', isProduction ? '' : 'admin@faceless.local'),
+  adminPassword: env('ADMIN_PASSWORD', isProduction ? '' : 'AdminStudio2026!'),
+  worker: {
+    enabled: envBool('WORKER_ENABLED', true),
+    concurrency: envInt('WORKER_CONCURRENCY', 2),
+    pollMs: envInt('WORKER_POLL_MS', 1000),
+    maxAttempts: envInt('WORKER_MAX_ATTEMPTS', 5),
+    jobTimeoutMs: envInt('JOB_TIMEOUT_MS', 20 * 60 * 1000),
+  },
+  ai: {
+    provider: env('AI_PROVIDER', 'local'),
+    model: env('AI_MODEL', ''),
+    maxScenes: envInt('MAX_SCENES', 8),
+    researchProvider: env('SEARCH_PROVIDER', 'none'),
+    researchApiKey: env('SEARCH_API_KEY'),
+    openaiKey: env('OPENAI_API_KEY'),
+    openaiModel: env('OPENAI_MODEL', 'gpt-4o-mini'),
+    anthropicKey: env('ANTHROPIC_API_KEY'),
+    anthropicModel: env('ANTHROPIC_MODEL', 'claude-3-5-haiku-latest'),
+    geminiKey: env('GEMINI_API_KEY'),
+    geminiModel: env('GEMINI_MODEL', 'gemini-2.0-flash'),
+  },
+  media: {
+    imageProvider: env('IMAGE_PROVIDER', 'procedural'),
+    openaiImageModel: env('OPENAI_IMAGE_MODEL', 'gpt-image-1'),
+    replicateToken: env('REPLICATE_API_TOKEN'),
+    replicateModel: env('REPLICATE_IMAGE_MODEL', 'black-forest-labs/flux-schnell'),
+    ttsProvider: env('TTS_PROVIDER', 'mespeak'),
+    openaiTtsModel: env('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
+    elevenLabsKey: env('ELEVENLABS_API_KEY'),
+    elevenLabsVoiceId: env('ELEVENLABS_VOICE_ID', '21m00Tcm4TlvDq8ikWAM'),
+    ffmpegPath: env('FFMPEG_PATH') || (await import('@ffmpeg-installer/ffmpeg')).default.path,
+  },
+  oauth: {
+    metaAppId: env('META_APP_ID') || env('FACEBOOK_APP_ID'),
+    metaAppSecret: env('META_APP_SECRET') || env('FACEBOOK_APP_SECRET'),
+    metaGraphVersion: env('META_GRAPH_VERSION', 'v26.0'),
+    googleClientId: env('GOOGLE_CLIENT_ID') || env('YOUTUBE_CLIENT_ID'),
+    googleClientSecret: env('GOOGLE_CLIENT_SECRET') || env('YOUTUBE_CLIENT_SECRET'),
+    xConsumerKey: env('X_CONSUMER_KEY'),
+    xConsumerSecret: env('X_CONSUMER_SECRET'),
+  },
+  stripe: {
+    secret: env('STRIPE_SECRET_KEY'),
+    webhookSecret: env('STRIPE_WEBHOOK_SECRET'),
+  },
+  notifications: {
+    smtpUrl: env('SMTP_URL'),
+    webhookUrl: env('NOTIFICATION_WEBHOOK_URL'),
+    from: env('NOTIFICATION_FROM', 'Faceless Studio <notifications@example.com>'),
+  },
+  apiRateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MINUTE', 600),
+  security: {
+    trustProxy: envBool('TRUST_PROXY', true),
+    secureCookies: envBool('SECURE_COOKIES', isProduction && env('PUBLIC_BASE_URL').startsWith('https://')),
+  },
+};
+
+const configured = {
+  local: true,
+  procedural: true,
+  mespeak: true,
+  ffmpeg: true,
+  openai: Boolean(config.ai.openaiKey),
+  anthropic: Boolean(config.ai.anthropicKey),
+  gemini: Boolean(config.ai.geminiKey),
+  brave: Boolean(config.ai.researchApiKey),
+  tavily: Boolean(config.ai.researchApiKey),
+  openaiImages: Boolean(config.ai.openaiKey),
+  replicate: Boolean(config.media.replicateToken),
+  elevenlabs: Boolean(config.media.elevenLabsKey),
+  facebook: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+  instagram: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+  youtube: Boolean(config.oauth.googleClientId && config.oauth.googleClientSecret),
+  x: Boolean(config.oauth.xConsumerKey && config.oauth.xConsumerSecret),
+  stripe: Boolean(config.stripe.secret),
+  smtp: Boolean(config.notifications.smtpUrl),
+  publicMedia: config.publicBaseUrl.startsWith('https://'),
+};
+
+export function providerStatus() {
+  const p = config.ai.provider;
+  return {
+    appName: config.appName,
+    environment: config.isProduction ? 'production' : 'development',
+    publicBaseUrl: config.publicBaseUrl,
+    publicMediaReady: configured.publicMedia,
+    ai: {
+      active: p,
+      configured: p === 'local' ? true : Boolean(configured[p]),
+      available: ['local', 'openai', 'anthropic', 'gemini'].filter((key) => configured[key]),
+    },
+    research: {
+      active: config.ai.researchProvider,
+      configured: config.ai.researchProvider === 'none' || Boolean(config.ai.researchApiKey),
+    },
+    images: {
+      active: config.media.imageProvider,
+      configured: config.media.imageProvider === 'procedural' || Boolean(configured[config.media.imageProvider]),
+      available: ['procedural', 'openai', 'replicate'].filter((key) => configured[key === 'openai' ? 'openaiImages' : key]),
+    },
+    tts: {
+      active: config.media.ttsProvider,
+      configured: config.media.ttsProvider === 'mespeak' || config.media.ttsProvider === 'openai'
+        ? Boolean(configured[config.media.ttsProvider])
+        : Boolean(configured.elevenlabs),
+      available: ['mespeak', ...(config.ai.openaiKey ? ['openai'] : []), ...(config.media.elevenLabsKey ? ['elevenlabs'] : [])],
+    },
+    videoRenderer: 'ffmpeg',
+    integrations: {
+      sandbox: { configured: true, mode: 'local-http', label: 'Sandbox' },
+      facebook: { configured: configured.facebook, mode: 'official-oauth', label: 'Facebook Pages' },
+      instagram: { configured: configured.instagram, mode: 'official-oauth', label: 'Instagram Business' },
+      youtube: { configured: configured.youtube, mode: 'official-oauth', label: 'YouTube' },
+      x: { configured: configured.x, mode: 'official-oauth', label: 'X' },
+    },
+    billing: { stripeConfigured: configured.stripe },
+    notifications: { smtpConfigured: configured.smtp, webhookConfigured: Boolean(config.notifications.webhookUrl) },
+    seedDemo: config.seedDemo,
+    demoCredentials: config.seedDemo
+      ? { email: config.demoEmail, password: config.isProduction && !envBool('EXPOSE_DEMO_CREDENTIALS', false) ? null : config.demoPassword }
+      : null,
+  };
+}
+
+export function assertProductionSecrets() {
+  const errors = [];
+  if (!config.databaseUrl) errors.push('DATABASE_URL is strongly recommended for production (SQLite is single-node only).');
+  if (!config.encryptionKeyMaterial) errors.push('APP_ENCRYPTION_KEY must be set to a base64-encoded 32-byte key.');
+  if (config.publicBaseUrl.startsWith('http://')) errors.push('PUBLIC_BASE_URL must be an HTTPS origin for OAuth and Instagram media URLs.');
+  if (config.adminEmail && !config.adminPassword) errors.push('ADMIN_PASSWORD is required when ADMIN_EMAIL is set.');
+  return errors;
+}
