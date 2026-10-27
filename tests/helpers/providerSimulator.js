@@ -67,13 +67,30 @@ function wrappedLlmText(provider, payload = {}) {
   return JSON.stringify({ candidates: [{ content: { parts: [{ text: plan }] } }] });
 }
 
+function expandForm(flat) {
+  const result = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.replace(/\]/g, '').split('[');
+    let cursor = result;
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      if (index === parts.length - 1) cursor[part] = value;
+      else {
+        if (!cursor[part] || typeof cursor[part] !== 'object') cursor[part] = {};
+        cursor = cursor[part];
+      }
+    }
+  }
+  return result;
+}
+
 function parseBody(req, buffer) {
   const contentType = String(req.headers['content-type'] || '');
   const raw = buffer.toString('utf8');
   if (contentType.includes('application/json')) {
     try { return JSON.parse(raw || '{}'); } catch { return {}; }
   }
-  if (contentType.includes('application/x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
+  if (contentType.includes('application/x-www-form-urlencoded')) return expandForm(Object.fromEntries(new URLSearchParams(raw)));
   if (contentType.includes('multipart/form-data')) {
     const command = /name="command"\r\n\r\n([^\r\n]+)/.exec(raw)?.[1];
     return { command, rawLength: buffer.length };
