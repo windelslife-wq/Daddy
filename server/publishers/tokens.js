@@ -28,7 +28,7 @@ async function refreshGoogle(account, credentials) {
   });
   let payload;
   try {
-    const { text } = await fetchWithTimeout('https://oauth2.googleapis.com/token', {
+    const { text } = await fetchWithTimeout(`${config.externalApis.googleOAuth}/token`, {
       method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form,
     }, 30000);
     payload = JSON.parse(text);

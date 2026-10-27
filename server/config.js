@@ -16,6 +16,9 @@ function envBool(name, fallback = false) {
   const value = env(name, fallback ? 'true' : 'false').toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(value);
 }
+function baseUrl(name, fallback) {
+  return (env(name) || fallback).replace(/\/+$/, '');
+}
 
 const port = envInt('PORT', 8787);
 const dataDir = path.resolve(root, env('DATA_DIR', 'data'));
@@ -104,7 +107,33 @@ export const config = {
   notifications: {
     smtpUrl: env('SMTP_URL'),
     webhookUrl: env('NOTIFICATION_WEBHOOK_URL'),
+    webhookSecret: env('NOTIFICATION_WEBHOOK_SECRET'),
+    webhookTimeoutMs: envInt('NOTIFICATION_WEBHOOK_TIMEOUT_MS', 10000),
     from: env('NOTIFICATION_FROM', 'Faceless Studio <notifications@example.com>'),
+  },
+  // These are server-side endpoint roots. Defaults always target the official APIs.
+  // Overrides are intended for isolated integration tests, approved API gateways,
+  // and enterprise proxies; never point them at an untrusted host.
+  externalApis: {
+    openai: baseUrl('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    anthropic: baseUrl('ANTHROPIC_BASE_URL', 'https://api.anthropic.com/v1'),
+    gemini: baseUrl('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
+    brave: baseUrl('BRAVE_BASE_URL', 'https://api.search.brave.com/res/v1/web'),
+    tavily: baseUrl('TAVILY_BASE_URL', 'https://api.tavily.com'),
+    replicate: baseUrl('REPLICATE_BASE_URL', 'https://api.replicate.com/v1'),
+    elevenLabs: baseUrl('ELEVENLABS_BASE_URL', 'https://api.elevenlabs.io/v1'),
+    metaGraph: baseUrl('META_GRAPH_BASE_URL', 'https://graph.facebook.com'),
+    metaAuth: baseUrl('META_AUTH_BASE_URL', 'https://www.facebook.com'),
+    googleApi: baseUrl('GOOGLE_API_BASE_URL', 'https://www.googleapis.com'),
+    googleUpload: baseUrl('GOOGLE_UPLOAD_BASE_URL', 'https://www.googleapis.com/upload/youtube/v3'),
+    googleAnalytics: baseUrl('GOOGLE_ANALYTICS_BASE_URL', 'https://youtubeanalytics.googleapis.com/v2'),
+    googleReporting: baseUrl('GOOGLE_REPORTING_BASE_URL', 'https://youtubereporting.googleapis.com/v1'),
+    googleOAuth: baseUrl('GOOGLE_OAUTH_BASE_URL', 'https://oauth2.googleapis.com'),
+    googleAuth: baseUrl('GOOGLE_AUTH_BASE_URL', 'https://accounts.google.com'),
+    xApi: baseUrl('X_API_BASE_URL', 'https://api.x.com/2'),
+    xOAuth: baseUrl('X_OAUTH_BASE_URL', 'https://api.x.com'),
+    xUpload: env('X_UPLOAD_BASE_URL', 'https://upload.twitter.com/1.1/media/upload.json'),
+    stripe: baseUrl('STRIPE_API_BASE_URL', 'https://api.stripe.com/v1'),
   },
   apiRateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MINUTE', 600),
   security: {
@@ -186,5 +215,8 @@ export function assertProductionSecrets() {
   if (!config.encryptionKeyMaterial) errors.push('APP_ENCRYPTION_KEY must be set to a base64-encoded 32-byte key.');
   if (config.publicBaseUrl.startsWith('http://')) errors.push('PUBLIC_BASE_URL must be an HTTPS origin for OAuth and Instagram media URLs.');
   if (config.adminEmail && !config.adminPassword) errors.push('ADMIN_PASSWORD is required when ADMIN_EMAIL is set.');
+  for (const [name, url] of Object.entries(config.externalApis)) {
+    if (!url.startsWith('https://')) errors.push(`${name} API override must use HTTPS in production.`);
+  }
   return errors;
 }

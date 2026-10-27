@@ -120,7 +120,7 @@ async function openAiImage(prompt, aspectRatio) {
   const model = config.media.openaiImageModel;
   const body = { model, prompt, n: 1, size: imageSize(aspectRatio) };
   if (model.startsWith('dall-e')) body.response_format = 'b64_json';
-  const { text } = await fetchWithTimeout('https://api.openai.com/v1/images/generations', {
+  const { text } = await fetchWithTimeout(`${config.externalApis.openai}/images/generations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.openaiKey}` },
     body: JSON.stringify(body),
@@ -140,7 +140,7 @@ async function replicateImage(prompt, aspectRatio) {
   if (!config.media.replicateToken) throw new Error('IMAGE_PROVIDER=replicate requires REPLICATE_API_TOKEN. No AI images were generated.');
   const model = config.media.replicateModel;
   let prediction;
-  const { text } = await fetchWithTimeout(`https://api.replicate.com/v1/models/${model}/predictions`, {
+  const { text } = await fetchWithTimeout(`${config.externalApis.replicate}/models/${model}/predictions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -153,7 +153,7 @@ async function replicateImage(prompt, aspectRatio) {
   const deadline = Date.now() + 180000;
   while (prediction.status !== 'succeeded' && Date.now() < deadline) {
     if (prediction.status === 'failed' || prediction.status === 'canceled') throw new Error(`Replicate image generation ${prediction.status}: ${prediction.error || 'unknown error'}`);
-    const pollUrl = prediction.urls?.get || `https://api.replicate.com/v1/predictions/${prediction.id}`;
+    const pollUrl = prediction.urls?.get || `${config.externalApis.replicate}/predictions/${prediction.id}`;
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const { text: pollText } = await fetchWithTimeout(pollUrl, { headers: { authorization: `Bearer ${config.media.replicateToken}` } }, 60000);
     prediction = JSON.parse(pollText);

@@ -19,6 +19,7 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
   'https://www.googleapis.com/auth/youtube.force-ssl',
+  'https://www.googleapis.com/auth/yt-analytics.readonly',
 ].join(' ');
 
 function requireMetaConfig() {
@@ -31,7 +32,7 @@ function requireGoogleConfig() {
 export async function startFacebook(req, res) {
   requireMetaConfig();
   const state = await createState('facebook', req.user.id, { requestedScopes: META_SCOPES });
-  const url = new URL(`https://www.facebook.com/${config.oauth.metaGraphVersion}/dialog/oauth`);
+  const url = new URL(`${config.externalApis.metaAuth}/${config.oauth.metaGraphVersion}/dialog/oauth`);
   url.searchParams.set('client_id', config.oauth.metaAppId);
   url.searchParams.set('redirect_uri', oauthCallbackUrl('facebook'));
   url.searchParams.set('state', state);
@@ -117,7 +118,7 @@ export async function handleFacebook(req, res) {
 export async function startGoogle(req, res) {
   requireGoogleConfig();
   const state = await createState('google', req.user.id, { requestedScopes: GOOGLE_SCOPES });
-  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  const url = new URL(`${config.externalApis.googleAuth}/o/oauth2/v2/auth`);
   url.searchParams.set('client_id', config.oauth.googleClientId);
   url.searchParams.set('redirect_uri', oauthCallbackUrl('google'));
   url.searchParams.set('response_type', 'code');
@@ -141,12 +142,12 @@ export async function handleGoogle(req, res) {
     redirect_uri: oauthCallbackUrl('google'),
     grant_type: 'authorization_code',
   });
-  const token = await oauthFetchJson('https://oauth2.googleapis.com/token', {
+  const token = await oauthFetchJson(`${config.externalApis.googleOAuth}/token`, {
     method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form,
   });
   if (!token.refresh_token) throw new AppError(400, 'missing_refresh_token', 'Google did not return a refresh token. Revoke this app’s access in your Google account, then reconnect with consent.');
   const expiresAt = new Date(Date.now() + Number(token.expires_in || 3600) * 1000).toISOString();
-  const channelsUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
+  const channelsUrl = new URL(`${config.externalApis.googleApi}/youtube/v3/channels`);
   channelsUrl.searchParams.set('part', 'snippet');
   channelsUrl.searchParams.set('mine', 'true');
   channelsUrl.searchParams.set('maxResults', '50');
@@ -175,7 +176,7 @@ export async function startX(req, res) {
   const state = await createState('x', req.user.id, {});
   const callback = oauthCallbackUrl('x', { state });
   const form = new URLSearchParams({ oauth_callback: callback });
-  const requestToken = await oauth1Fetch('https://api.x.com/oauth/request_token', {
+  const requestToken = await oauth1Fetch(`${config.externalApis.xOAuth}/oauth/request_token`, {
     method: 'POST',
     data: { oauth_callback: callback },
     body: form,
@@ -188,7 +189,7 @@ export async function startX(req, res) {
   await db('oauth_states').where({ state, provider: 'x' }).update({
     metadata: json({ requestToken: requestToken.oauth_token, requestTokenSecret: requestToken.oauth_token_secret, callback }),
   });
-  const authorize = new URL('https://api.x.com/oauth/authorize');
+  const authorize = new URL(`${config.externalApis.xOAuth}/oauth/authorize`);
   authorize.searchParams.set('oauth_token', requestToken.oauth_token);
   authorize.searchParams.set('state', state);
   res.redirect(authorize.toString());
@@ -200,7 +201,7 @@ export async function handleX(req, res) {
   if (!req.query.oauth_verifier || !req.query.oauth_token) throw badRequest('X did not return an OAuth verifier.');
   if (req.query.oauth_token !== metadata.requestToken) throw badRequest('The X OAuth token does not match the saved request token.');
   const form = new URLSearchParams({ oauth_verifier: String(req.query.oauth_verifier) });
-  const access = await oauth1Fetch('https://api.x.com/oauth/access_token', {
+  const access = await oauth1Fetch(`${config.externalApis.xOAuth}/oauth/access_token`, {
     method: 'POST',
     token: { key: metadata.requestToken, secret: metadata.requestTokenSecret },
     data: { oauth_verifier: String(req.query.oauth_verifier) },
@@ -210,7 +211,7 @@ export async function handleX(req, res) {
   });
   if (!access.oauth_token || !access.oauth_token_secret) throw new AppError(502, 'oauth_provider_error', 'X did not return user access tokens.');
   const tokens = { key: access.oauth_token, secret: access.oauth_token_secret };
-  const profileUrl = new URL('https://api.x.com/2/users/me');
+  const profileUrl = new URL(`${config.externalApis.xApi}/users/me`);
   profileUrl.searchParams.set('user.fields', 'id,username,name,profile_image_url');
   let profile = null;
   try {

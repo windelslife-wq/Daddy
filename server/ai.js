@@ -67,7 +67,7 @@ export function extractJson(text) {
 export async function callLLM(prompt, { system = 'You are a professional short-form video writer.', temperature = 0.8, maxTokens = 4000 } = {}) {
   const provider = config.ai.provider;
   if (provider === 'openai') {
-    const { text } = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+    const { text } = await fetchWithTimeout(`${config.externalApis.openai}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.openaiKey}` },
       body: JSON.stringify({
@@ -81,7 +81,7 @@ export async function callLLM(prompt, { system = 'You are a professional short-f
     return JSON.parse(text).choices?.[0]?.message?.content || '';
   }
   if (provider === 'anthropic') {
-    const { text } = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
+    const { text } = await fetchWithTimeout(`${config.externalApis.anthropic}/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': config.ai.anthropicKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: config.ai.anthropicModel, system, max_tokens: maxTokens, temperature, messages: [{ role: 'user', content: prompt }] }),
@@ -89,7 +89,7 @@ export async function callLLM(prompt, { system = 'You are a professional short-f
     return JSON.parse(text).content?.map((part) => part.text || '').join('\n') || '';
   }
   if (provider === 'gemini') {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.ai.geminiModel)}:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
+    const url = `${config.externalApis.gemini}/models/${encodeURIComponent(config.ai.geminiModel)}:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
     const { text } = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -111,14 +111,14 @@ export async function researchTopic(topic, niche = '') {
   const query = `${niche ? `${niche}: ` : ''}${topic}`.slice(0, 300);
   let raw = [];
   if (provider === 'brave') {
-    const url = new URL('https://api.search.brave.com/res/v1/web/search');
+    const url = new URL(`${config.externalApis.brave}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('count', '5');
     url.searchParams.set('freshness', 'pm');
     const { text } = await fetchWithTimeout(url, { headers: { accept: 'application/json', 'x-subscription-token': config.ai.researchApiKey } }, 30000);
     raw = JSON.parse(text).web?.results || [];
   } else if (provider === 'tavily') {
-    const { text } = await fetchWithTimeout('https://api.tavily.com/search', {
+    const { text } = await fetchWithTimeout(`${config.externalApis.tavily}/search`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ api_key: config.ai.researchApiKey, query, search_depth: 'basic', max_results: 5, include_answer: false }),
     }, 30000);

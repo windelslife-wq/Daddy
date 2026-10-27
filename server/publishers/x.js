@@ -7,8 +7,8 @@ import { logger } from '../logger.js';
 import { updatePublicationMetadata } from './context.js';
 import { authError, configError, PublishError } from './errors.js';
 
-const UPLOAD_URL = 'https://upload.twitter.com/1.1/media/upload.json';
-const API = 'https://api.x.com/2';
+const UPLOAD_URL = config.externalApis.xUpload;
+const API = config.externalApis.xApi;
 
 function assertXConfig() {
   if (!config.oauth.xConsumerKey || !config.oauth.xConsumerSecret) throw configError('X_CONSUMER_KEY and X_CONSUMER_SECRET are not configured on the server.');
@@ -193,22 +193,62 @@ export async function publishX(ctx) {
   };
 }
 
+function estimatedWatchSeconds(media) {
+  const durationSeconds = Number(media?.duration_ms || 0) / 1000;
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
+  const playback = media?.non_public_metrics || media?.organic_metrics || {};
+  const quarter = [0, 25, 50, 75, 100].map((point) => Number(playback[`playback_${point}_count`] || 0));
+  if (!quarter.some((value) => value > 0)) return 0;
+  const buckets = [
+    [0.125, Math.max(0, quarter[0] - quarter[1])],
+    [0.375, Math.max(0, quarter[1] - quarter[2])],
+    [0.625, Math.max(0, quarter[2] - quarter[3])],
+    [0.875, Math.max(0, quarter[3] - quarter[4])],
+    [1, Math.max(0, quarter[4])],
+  ];
+  return Math.round(buckets.reduce((total, [fraction, count]) => total + durationSeconds * fraction * count, 0));
+}
+
+async function xTweetLookup(remoteId, tokens, includePrivateMetrics) {
+  const url = new URL(`${API}/tweets/${encodeURIComponent(remoteId)}`);
+  if (includePrivateMetrics) {
+    url.searchParams.set('expansions', 'attachments.media_keys');
+    url.searchParams.set('tweet.fields', 'public_metrics,created_at,attachments,non_public_metrics,organic_metrics');
+    url.searchParams.set('media.fields', 'duration_ms,public_metrics,non_public_metrics,organic_metrics,type,media_key');
+  } else {
+    url.searchParams.set('tweet.fields', 'public_metrics,created_at');
+  }
+  return xJson(url, { method: 'GET', tokens, data: Object.fromEntries(url.searchParams) });
+}
+
 export async function fetchXMetrics(ctx, remoteId) {
   const tokens = tokenPair(ctx);
-  const url = new URL(`${API}/tweets/${encodeURIComponent(remoteId)}`);
-  url.searchParams.set('tweet.fields', 'public_metrics,created_at');
-  const data = Object.fromEntries(url.searchParams);
-  const result = await xJson(url, { method: 'GET', tokens, data });
+  const notes = [];
+  let result;
+  try {
+    result = await xTweetLookup(remoteId, tokens, true);
+  } catch (error) {
+    if (![400, 401, 403, 404].includes(Number(error.status))) throw error;
+    notes.push('Private media metrics are not available with the current X API tier; public post metrics were used.');
+    result = await xTweetLookup(remoteId, tokens, false);
+  }
   const metrics = result.data?.public_metrics;
   if (!metrics) throw new PublishError('X public metrics are not available for this post with the current API access.', { code: 'metrics_unavailable', retryable: false, status: 404 });
+  const media = (result.includes?.media || []).find((item) => item.type === 'video') || result.includes?.media?.[0] || null;
+  const mediaPublicMetrics = media?.public_metrics || {};
+  const impressions = Number(metrics.impression_count || 0);
+  const views = Number(mediaPublicMetrics.view_count || media?.organic_metrics?.view_count || impressions);
+  const watchSeconds = estimatedWatchSeconds(media);
+  if (media && !watchSeconds) notes.push('X exposes video playback quartiles rather than exact watch time; watchSeconds is 0 until those private fields are available.');
+  else if (watchSeconds) notes.push('watchSeconds is estimated from X video playback quartiles and media duration.');
   return {
-    views: Number(metrics.impression_count || 0),
+    views,
     likes: Number(metrics.like_count || 0),
     comments: Number(metrics.reply_count || 0),
     shares: Number(metrics.retweet_count || 0) + Number(metrics.quote_count || 0),
-    impressions: Number(metrics.impression_count || 0),
-    watchSeconds: 0,
-    raw: { ...result, note: 'X public metrics; video watch time requires separate analytics access.' },
+    impressions,
+    watchSeconds,
+    raw: { ...result, notes, mediaMetrics: media ? { public: media.public_metrics || {}, organic: media.organic_metrics || {}, nonPublic: media.non_public_metrics || {}, durationMs: media.duration_ms || null } : null },
   };
 }
 

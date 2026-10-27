@@ -64,7 +64,7 @@ async function synthesizeScene({ text, language, voice, outputPath, workDir, ind
   } else if (provider === 'openai') {
     const openaiVoice = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(voice) ? voice : 'alloy';
     rawPath = path.join(workDir, `voice-${index}.wav`);
-    await writeBinaryResponse('https://api.openai.com/v1/audio/speech', {
+    await writeBinaryResponse(`${config.externalApis.openai}/audio/speech`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${config.ai.openaiKey}` },
       body: JSON.stringify({ model: config.media.openaiTtsModel, voice: openaiVoice, input: text, response_format: 'wav' }),
@@ -72,7 +72,7 @@ async function synthesizeScene({ text, language, voice, outputPath, workDir, ind
   } else if (provider === 'elevenlabs') {
     const voiceId = voice === 'eleven-default' || !VOICE_PRESETS[voice] ? config.media.elevenLabsVoiceId : voice;
     rawPath = path.join(workDir, `voice-${index}.mp3`);
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`;
+    const url = `${config.externalApis.elevenLabs}/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`;
     await writeBinaryResponse(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'xi-api-key': config.media.elevenLabsKey },

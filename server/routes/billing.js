@@ -22,7 +22,7 @@ async function stripeRequest(path, { method = 'GET', params = {} } = {}) {
   const form = new URLSearchParams();
   if (method !== 'GET') appendForm(form, '', undefined);
   for (const [key, value] of Object.entries(params)) appendForm(form, key, value);
-  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+  const response = await fetch(`${config.externalApis.stripe}${path}`, {
     method,
     headers: { authorization: `Bearer ${config.stripe.secret}`, 'content-type': 'application/x-www-form-urlencoded' },
     body: method === 'GET' ? undefined : form,

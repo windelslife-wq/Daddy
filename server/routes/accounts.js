@@ -6,7 +6,7 @@ import { asyncHandler, notFound, forbidden } from '../errors.js';
 import { parseBody } from '../validation.js';
 import { encrypt, safeParseCredentials } from '../security.js';
 import { PLATFORMS } from '../constants.js';
-import { providerStatus } from '../config.js';
+import { config, providerStatus } from '../config.js';
 import { graphRequest } from '../publishers/graph.js';
 import { verifyAccountConnection } from '../publishers/index.js';
 import { sendNotification } from '../notifications.js';
@@ -57,7 +57,7 @@ async function attemptRemoteRevoke(account) {
     if (account.platform === 'youtube') {
       const token = credentials.refreshToken || credentials.accessToken;
       if (token) {
-        await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(15000) });
+        await fetch(`${config.externalApis.googleOAuth}/revoke?token=${encodeURIComponent(token)}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(15000) });
         return { revoked: true, provider: 'google' };
       }
     }

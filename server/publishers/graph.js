@@ -5,7 +5,7 @@ import { PublishError } from './errors.js';
 
 export function graphUrl(path, params = {}, accessToken = null) {
   const version = config.oauth.metaGraphVersion.replace(/^\/?v?/, 'v').replace(/\/$/, '');
-  const url = new URL(`https://graph.facebook.com/${version}/${String(path).replace(/^\/+/, '')}`);
+  const url = new URL(`${config.externalApis.metaGraph}/${version}/${String(path).replace(/^\/+/, '')}`);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
