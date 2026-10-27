@@ -18,6 +18,9 @@ const tabs = [
 ];
 
 function boolValue(value) { return value === true || value === 1 || value === 'true'; }
+function readinessTone(status) {
+  return { pass: 'completed', warn: 'needs_review', fail: 'failed', external: 'processing' }[status] || 'draft';
+}
 
 export default function Admin() {
   const { showToast } = useToast();
@@ -175,6 +178,19 @@ export default function Admin() {
                 </div>
                 <InfoBanner icon={KeyRound}><strong>Secrets are environment-only.</strong><span> The admin panel can report status and toggle platform settings, but never reads or writes secret API keys.</span></InfoBanner>
               </Card>}
+              {tab === 'integrations' && data?.readiness && <>
+                <Card title="Deployment readiness" icon={ShieldCheck} subtitle={`Overall: ${data.readiness.overall}. ${data.readiness.note}`}>
+                  <div className="table-wrap"><table><thead><tr><th>Check</th><th>Status</th><th>Detail</th><th>Action</th></tr></thead><tbody>{data.readiness.checks.map((item) => <tr key={item.id}><td><strong>{item.title}</strong></td><td><StatusBadge status={readinessTone(item.status)} label={item.status.toUpperCase()} /></td><td><small>{typeof item.detail === 'string' ? item.detail : (item.detail?.facebook || '')}</small></td><td><small>{item.action || '—'}{item.docs ? <> <a href={item.docs} target="_blank" rel="noreferrer">Docs</a></> : null}</small></td></tr>)}</tbody></table></div>
+                  <div className="grid grid-2" style={{ marginTop: 16 }}>
+                    <div><h3>Exact callback URLs</h3><ul className="env-list">{Object.entries(data.readiness.callbacks).map(([key, value]) => <li key={key}><strong>{key}</strong><br /><code>{value}</code></li>)}</ul></div>
+                    <div><h3>Public origin</h3><KeyValue items={[['Value', data.readiness.publicBaseUrl.value], ['HTTPS', data.readiness.publicBaseUrl.https ? 'yes' : 'no'], ['Local/test host', data.readiness.publicBaseUrl.local ? 'yes' : 'no'], ['Environment', data.readiness.environment]]} />{data.readiness.productionWarnings.length > 0 && <div className="banner banner-warning" style={{ marginTop: 12, marginBottom: 0 }}><AlertCircle size={18} /><div><strong>Production warnings</strong><span>{data.readiness.productionWarnings.join(' ')}</span></div></div>}</div>
+                  </div>
+                </Card>
+                <Card title="Provider app review & business verification" icon={KeyRound}>
+                  <div className="stack">{data.readiness.providerApproval.map((item) => <details key={item.id} className="card" style={{ padding: 14 }}><summary style={{ cursor: 'pointer', fontWeight: 700 }}>{item.platform} — {item.loginType}</summary><div className="stack" style={{ marginTop: 12 }}><div><strong>Permissions/scopes</strong><div className="row row-wrap" style={{ marginTop: 6 }}>{(item.requiredPermissions || item.requiredScopes || item.requiredEvents || []).map((value) => <code key={value}>{value}</code>)}</div></div><p className="tiny"><strong>App review:</strong> {item.appReview}</p><p className="tiny"><strong>Business verification:</strong> {item.businessVerification}</p><p className="tiny"><strong>Account requirements:</strong> {item.accountRequirements}</p><p className="tiny"><strong>Conditional:</strong> {item.conditionalPermissions || '—'}</p><div className="row row-wrap">{(item.docs || []).map((url) => <a key={url} href={url} target="_blank" rel="noreferrer">Official docs</a>)}</div></div></details>)}</div>
+                  <InfoBanner icon={ShieldCheck}><strong>These are provider-console steps.</strong><span> No code can grant Advanced Access, approve an OAuth consent screen, activate a paid API tier, or verify a business. The checks above remain explicitly external until you finish them.</span></InfoBanner>
+                </Card>
+              </>}
               {tab === 'logs' && <Card title="Audit logs" icon={ShieldCheck}><div className="table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>User</th><th>Details</th></tr></thead><tbody>{(data?.logs || []).map((log) => <tr key={log.id}><td><small>{formatDate(log.createdAt)}</small></td><td>{log.action}</td><td>{log.entityType}<br /><small>{log.entityId}</small></td><td><small>{log.userId}</small></td><td><small className="mono">{JSON.stringify(log.details).slice(0, 120)}</small></td></tr>)}</tbody></table></div></Card>}
             </>
           )}

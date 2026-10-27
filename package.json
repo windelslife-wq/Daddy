@@ -16,6 +16,7 @@
     "test:integrations": "node --test tests/provider-integrations.test.js tests/external-services.test.js",
     "test:e2e": "node tests/e2e.js",
     "test:visual": "npm run build && node --test tests/visual.js",
+    "doctor": "node scripts/doctor.js",
     "test:all": "npm test && npm run test:e2e && npm run test:visual"
   },
   "dependencies": {

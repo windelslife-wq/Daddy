@@ -10,9 +10,12 @@ import {
   oauthSuccess, oauthFetchJson,
 } from './helpers.js';
 
+// This integration uses Facebook Login for Business (`graph.facebook.com`),
+// so it requests the Facebook Login permission family. Instagram Login apps use
+// the separate instagram_business_* permission family and a different host.
 const META_SCOPES = [
   'public_profile', 'pages_show_list', 'pages_read_engagement', 'pages_manage_posts',
-  'instagram_basic', 'instagram_content_publish', 'business_management',
+  'instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'business_management',
 ].join(',');
 const GOOGLE_SCOPES = [
   'openid', 'email', 'profile',

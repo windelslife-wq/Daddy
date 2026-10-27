@@ -6,6 +6,7 @@ import { asyncHandler, badRequest, notFound, conflict } from '../errors.js';
 import { parseBody, planSchema } from '../validation.js';
 import { providerStatus, assertProductionSecrets } from '../config.js';
 import { retryPublication, publicationView } from '../services/projects.js';
+import { buildIntegrationReadiness } from '../services/integrationReadiness.js';
 import { accountView } from './accounts.js';
 import { sendNotification } from '../notifications.js';
 
@@ -239,11 +240,16 @@ export function adminRouter() {
     res.json(result);
   }));
 
+  router.get('/integration-readiness', asyncHandler(async (req, res) => {
+    res.json(await buildIntegrationReadiness({ probe: req.query.probe === '1' }));
+  }));
+
   router.get('/integrations', asyncHandler(async (_req, res) => {
     const status = providerStatus();
     const accounts = await db('accounts').groupBy('platform').count({ count: '*' });
     res.json({
       providerStatus: status,
+      readiness: await buildIntegrationReadiness(),
       accounts: accounts.map((row) => ({ platform: row.platform, count: number(row.count) })),
       requiredEnvironment: {
         ai: ['AI_PROVIDER', 'OPENAI_API_KEY or ANTHROPIC_API_KEY or GEMINI_API_KEY'],

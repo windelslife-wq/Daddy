@@ -61,8 +61,14 @@ For a multi-process deployment, run one or more dedicated workers with the same 
 ## Test the entire workflow
 
 ```bash
-npm test          # unit tests: crypto, AI plans, media helpers, WAV, scheduler
-npm run test:e2e  # full workflow test on an isolated SQLite DB and port
+npm test                   # unit + provider contract + PostgreSQL/worker tests
+npm run test:integrations   # official platform and external-service simulator suites
+npm run test:e2e           # full credential-free generation → sandbox publishing workflow
+npm run test:visual        # real Chromium QA on the production build
+npm run test:all           # all of the above
+npm run doctor             # deployment / app-review readiness report
+npm run doctor -- --probe  # also checks the public health URL
+npm run doctor -- --json   # machine-readable readiness report
 ```
 
 The end-to-end test starts its own server and worker, verifies:
@@ -80,6 +86,16 @@ The end-to-end test starts its own server and worker, verifies:
 11. account toggles, verification, and secure disconnect.
 
 The E2E test uses temporary data and storage directories and removes them afterward.
+
+Additional verification suites cover the modules that previously required external accounts. They start a local HTTP/SMTP simulator and point only server-side API roots at it; no real social, AI, billing, or email account is contacted:
+
+- `tests/provider-integrations.test.js`: Meta/Facebook/Instagram, Google/YouTube, and X OAuth connect → encrypted account → official upload/publish → metrics → provider-side revoke, including duplicate suppression.
+- `tests/external-services.test.js`: OpenAI/Anthropic/Gemini scripts, Brave/Tavily research, OpenAI/Replicate images, OpenAI/ElevenLabs TTS, Stripe checkout/signature-verified webhooks, SMTP delivery, and signed notification webhooks.
+- `tests/analytics-adapters.test.js`: YouTube Analytics watch time/shares, YouTube Reporting thumbnail impressions, and X video views/quartile-based watch-time estimates.
+- `tests/postgres-multiprocess.test.js`: PostgreSQL schema/seeding via `pg-mem` and two real worker processes claiming jobs without duplicates.
+- `tests/visual.js`: production login, nine workspace routes, desktop/mobile screenshots, overflow checks, and console/page/network error checks. Screenshots are written to ignored `test-artifacts/`.
+
+`npm run doctor` and **Admin → Integrations → Deployment readiness** show the exact callback URLs, HTTPS/media/worker/database checks, production warnings, and the provider app-review checklist without exposing secrets.
 
 ---
 
@@ -104,10 +120,10 @@ If an external script provider is selected but fails, generation fails with a cl
 
 | Platform | OAuth path | Required server variables | Account requirements |
 |---|---|---|---|
-| Facebook Pages | `/api/oauth/facebook/connect` | `META_APP_ID`, `META_APP_SECRET` | Manageable Facebook Page, `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`; app review / Business Verification may be required |
-| Instagram Reels | same Meta flow | `META_APP_ID`, `META_APP_SECRET`, public HTTPS `PUBLIC_BASE_URL` | Professional/Business Instagram account linked to a selected Facebook Page; `instagram_business_basic`, `instagram_business_content_publish`; public HTTPS media URL |
-| YouTube | `/api/oauth/google/callback` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | YouTube Data API v3 enabled, OAuth consent screen/test users, `youtube.upload` scope, sufficient API quota |
-| X | `/api/oauth/x/connect` | `X_CONSUMER_KEY`, `X_CONSUMER_SECRET` | OAuth 1.0a user context, read/write app permissions, API tier allowing media upload and tweet creation |
+| Facebook Pages | `/api/oauth/facebook/connect` | `META_APP_ID`, `META_APP_SECRET` | Manageable Facebook Page; Facebook Login for Business permissions `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`; app review / Business Verification may be required |
+| Instagram Reels | same Meta flow | `META_APP_ID`, `META_APP_SECRET`, public HTTPS `PUBLIC_BASE_URL` | Professional Instagram account linked to the selected Facebook Page; Facebook Login permissions `instagram_basic`, `instagram_content_publish`, `instagram_manage_insights`, `pages_read_engagement`; public HTTPS media URL. Apps using **Instagram Login** instead need the separate `instagram_business_*` permission family and host |
+| YouTube | `/api/oauth/google/callback` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | YouTube Data API v3, Analytics API, and Reporting API enabled; verified consent screen/test users; `youtube.upload`, `youtube.readonly`, `youtube.force-ssl`, and `yt-analytics.readonly` scopes; sufficient API quota |
+| X | `/api/oauth/x/connect` | `X_CONSUMER_KEY`, `X_CONSUMER_SECRET` | OAuth 1.0a user context, read/write app permissions, API tier allowing v1.1 media upload, v2 post creation, and private media metrics for full video analytics |
 | Sandbox | `/api/oauth/sandbox/connect` | none | Built-in local HTTP publisher; **not an external social network** |
 
 OAuth callback URLs to whitelist:
@@ -116,7 +132,22 @@ OAuth callback URLs to whitelist:
 {PUBLIC_BASE_URL}/api/oauth/facebook/callback
 {PUBLIC_BASE_URL}/api/oauth/google/callback
 {PUBLIC_BASE_URL}/api/oauth/x/callback
+{PUBLIC_BASE_URL}/api/oauth/sandbox/callback
+{PUBLIC_BASE_URL}/api/billing/webhook
 ```
+
+`npm run doctor` prints the exact resolved URLs for the current `PUBLIC_BASE_URL`.
+
+### Provider app review / Business Verification
+
+These steps happen in provider consoles and cannot be completed from this repository:
+
+1. **Meta:** create a Facebook Login for Business app, request Advanced Access for the permissions above, complete Business Verification, add test Pages/Professional Instagram accounts, and submit a screencast of the OAuth → review → publish flow. Instagram Reels media must be reachable over public HTTPS.
+2. **Google:** enable YouTube Data API v3, YouTube Analytics API, and YouTube Reporting API; configure the OAuth consent screen; publish it or add verified test users; reconnect existing channels after adding `yt-analytics.readonly`. Bulk thumbnail-impression reports can take up to 48 hours to appear after the reporting job is created.
+3. **X:** configure OAuth 1.0a with read/write permissions, the exact callback URL, media upload access, and an API tier that permits post creation and private playback metrics.
+4. **Stripe:** create recurring Prices, store each Price ID in Admin → Plans, register the webhook URL above, and subscribe to `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.payment_failed`.
+
+Admin → Integrations keeps these items visible with `EXTERNAL` status until you confirm them in each provider console.
 
 `PUBLIC_BASE_URL` must be a public HTTPS origin for real OAuth and Instagram. Instagram’s container API needs to download the video from an HMAC-signed public media URL; the platform refuses to pretend an `http://localhost` URL is sufficient.
 
@@ -131,7 +162,7 @@ Official docs used for the adapters:
 
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`: enable paid subscription checkout and signed webhooks.
 - Each paid plan needs a real Stripe `price_...` ID in Admin → Plans. Without it, checkout returns `stripe_price_missing`; no fake charge is attempted.
-- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook. In-app notifications work without either.
+- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook; set `NOTIFICATION_WEBHOOK_SECRET` to verify the HMAC `X-Faceless-Signature` (`sha256=HMAC(secret, "timestamp.rawBody")`). In-app notifications work without either.
 
 ---
 
@@ -141,7 +172,7 @@ Official docs used for the adapters:
 
 Open **Accounts → Connect sandbox channel** for a credential-free end-to-end test. The consent screen creates an encrypted random bearer token and a local HTTP channel. For official accounts, configure environment variables first, then use the matching Connect button and provider OAuth consent flow.
 
-The account list shows status, scopes, token expiry, active/autopilot toggles, a real **Test** button that calls the provider verification endpoint, and **Disconnect** which clears stored encrypted tokens immediately. Google and Meta revocation is attempted where the official API supports it; otherwise revoke app access in the provider’s security settings.
+The account list shows status, scopes, token expiry, active/autopilot toggles, a real **Test** button that calls the provider verification endpoint, and **Disconnect** which clears stored encrypted tokens immediately. Google, Meta, and X provider-side revocation is attempted where the official API supports it; otherwise revoke app access in the provider’s security settings.
 
 ### 2. Create a video
 
@@ -167,7 +198,7 @@ Duplicate prevention is enforced at several layers: unique `publications.idempot
 
 ### 4. Analytics
 
-**Analytics** shows real metrics returned by official APIs. Sandbox metrics are deterministic and explicitly labeled simulated; they are excluded from data-backed recommendations. The recommendations worker uses measured official metrics when at least three snapshots are available; otherwise it provides clearly labeled baseline guidance. Optional LLM recommendations activate only when an external AI provider is configured.
+**Analytics** shows real metrics returned by official APIs: YouTube Data API engagement plus YouTube Analytics watch time/shares and YouTube Reporting thumbnail impressions; X post impressions, video views, and an explicitly estimated watch time from private playback quartiles; and Meta video insights where the approved scopes/tier allow them. Sandbox metrics are deterministic and explicitly labeled simulated; they are excluded from data-backed recommendations. The recommendations worker uses measured official metrics when at least three snapshots are available; otherwise it provides clearly labeled baseline guidance. Optional LLM recommendations activate only when an external AI provider is configured.
 
 ### 5. Admin
 
@@ -207,6 +238,7 @@ Key implementation details:
 - `server/media/*`: original SVG scene generator, external image providers, TTS, procedural music, SRT, FFmpeg render, signed media URLs, platform variants.
 - `server/publishers/*`: sandbox, Meta/Facebook/Instagram, YouTube, X adapters, token refresh, metrics, duplicate recovery.
 - `server/worker.js`: persistent job worker with conditional claims, stale recovery, retries, scheduler ticks.
+- `server/services/integrationReadiness.js`: deployment doctor, exact callback URLs, and provider app-review checklist.
 - `server/oauth/*`: OAuth 2.0 / OAuth 1.0a flows and encrypted account storage.
 - `src/*`: responsive React dashboard and public sandbox viewer.
 
@@ -223,15 +255,15 @@ Databases and generated files are stored under `data/` and `storage/` by default
 5. Whitelist the exact OAuth callback URLs in each provider console.
 6. Complete Meta App Review / Business Verification, Google OAuth consent verification, and X app permission review as required.
 7. Configure Stripe Price IDs and `STRIPE_WEBHOOK_SECRET`; point the Stripe webhook to `/api/billing/webhook`.
-8. Run `npm run build`, `npm test`, and `npm run test:e2e` in CI.
-9. Monitor `/api/meta/health`, job failures, and Admin → Overview production warnings.
+8. Run `npm run build`, `npm run test:all`, and `npm run doctor -- --probe` in CI. The simulator suites verify official adapters without live credentials; they do not replace a final smoke test with approved real accounts.
+9. Monitor `/api/meta/health`, job failures, Admin → Overview production warnings, and Admin → Integrations readiness.
 10. Respect platform automation, copyright, community, and rate-limit rules. Review factual niches before enabling full autopilot.
 
 ---
 
 ## Important limitations
 
-- Official publishing cannot be tested in this repository without external OAuth apps, approved permissions, and account access. The local sandbox publisher exists to verify the full workflow without pretending those integrations are live.
+- Official publishing code paths are now contract-tested end to end against a local simulator, but **live** publishing still requires external OAuth apps, approved permissions, paid/eligible API tiers, and real account access. The local sandbox publisher verifies the full credential-free workflow as well; simulator results are never presented as live provider posts.
 - Instagram requires a public HTTPS `PUBLIC_BASE_URL`; local HTTP is intentionally rejected.
 - Official platform APIs may change scopes, app review requirements, quotas, or tier availability. `providerStatus()` and Admin → Integrations expose current configuration; publication errors surface provider messages and codes.
 - SQLite is suitable for local/single-node use. PostgreSQL is recommended when running multiple API/worker processes.
