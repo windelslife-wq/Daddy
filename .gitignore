@@ -13,4 +13,5 @@ storage/
 .DS_Store
 coverage/
 .playwright-cli/
+test-artifacts/
 __pycache__/

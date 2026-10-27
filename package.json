@@ -15,7 +15,8 @@
     "test": "node --test tests/*.test.js",
     "test:integrations": "node --test tests/provider-integrations.test.js tests/external-services.test.js",
     "test:e2e": "node tests/e2e.js",
-    "test:all": "npm test && npm run test:e2e"
+    "test:visual": "npm run build && node --test tests/visual.js",
+    "test:all": "npm test && npm run test:e2e && npm run test:visual"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
