@@ -9,6 +9,7 @@ import { retryPublication, publicationView } from '../services/projects.js';
 import { buildIntegrationReadiness } from '../services/integrationReadiness.js';
 import { accountView } from './accounts.js';
 import { sendNotification } from '../notifications.js';
+import { contactMessageView } from './contact.js';
 
 const userPatchSchema = z.object({
   role: z.enum(['user', 'admin']).optional(),
@@ -92,23 +93,38 @@ export function adminRouter() {
   const router = express.Router();
   router.use(requireAuth, requireAdmin);
 
+  router.get('/contact-messages', asyncHandler(async (_req, res) => {
+    const rows = await db('contact_messages').orderBy('created_at', 'desc').limit(100);
+    res.json({ messages: rows.map(contactMessageView) });
+  }));
+
+  router.patch('/contact-messages/:id', asyncHandler(async (req, res) => {
+    const data = parseBody(z.object({ status: z.enum(['new', 'reviewed', 'archived']) }), req.body);
+    const updated = await db('contact_messages').where({ id: req.params.id }).update({ status: data.status, updated_at: now() });
+    if (!updated) throw notFound('Contact message not found.');
+    const row = await db('contact_messages').where({ id: req.params.id }).first();
+    await logAudit({ userId: req.user.id, action: 'contact.message.status_changed', entityType: 'contact_message', entityId: row.id, details: { status: data.status }, ip: req.ip || null });
+    res.json({ message: contactMessageView(row) });
+  }));
+
   router.get('/overview', asyncHandler(async (_req, res) => {
     const count = async (table, where = {}) => number((await db(table).where(where).count({ count: '*' }).first())?.count);
     const [
       users, projects, posts, publications, published, failedPublications, accounts,
-      queuedJobs, runningJobs, failedJobs, metricsRows,
+      queuedJobs, runningJobs, failedJobs, metricsRows, contactMessages, newContactMessages,
     ] = await Promise.all([
       count('users'), count('projects'), count('posts'), count('publications'),
       count('publications', { status: 'published' }), count('publications', { status: 'failed' }),
       count('accounts'), count('jobs', { status: 'queued' }), count('jobs', { status: 'running' }),
-      count('jobs', { status: 'failed' }), count('post_metrics'),
+      count('jobs', { status: 'failed' }), count('post_metrics'), count('contact_messages'),
+      count('contact_messages', { status: 'new' }),
     ]);
     const recentJobs = await db('jobs').orderBy('created_at', 'desc').limit(12);
     const recentFailures = await db('publications').where({ status: 'failed' }).orderBy('updated_at', 'desc').limit(8);
     const recentUsers = await db('users').orderBy('created_at', 'desc').limit(8);
     const views = await db('post_metrics').sum({ total: 'views' }).first();
     res.json({
-      counts: { users, projects, posts, publications, published, failedPublications, accounts, queuedJobs, runningJobs, failedJobs, metricsRows },
+      counts: { users, projects, posts, publications, published, failedPublications, accounts, queuedJobs, runningJobs, failedJobs, metricsRows, contactMessages, newContactMessages },
       totalViews: number(views?.total),
       recentJobs: recentJobs.map(jobView),
       recentFailures: recentFailures.map((row) => publicationView(row)),

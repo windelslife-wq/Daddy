@@ -10,6 +10,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import chromium, { inflate, setupLambdaEnvironment } from '@sparticuz/chromium';
 import { chromium as playwrightChromium } from 'playwright-core';
+import { PUBLIC_PAGES } from '../src/config/site.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const artifactDir = path.join(root, 'test-artifacts');
@@ -25,6 +26,7 @@ let page;
 const pageErrors = [];
 const consoleErrors = [];
 const failedRequests = [];
+const httpErrors = [];
 
 async function freePort() {
   const probe = net.createServer();
@@ -43,12 +45,35 @@ async function poll(label, fn, timeoutMs = 30000, intervalMs = 200) {
   }
   throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`);
 }
+async function setTheme(label) {
+  await page.locator('.theme-trigger').first().click();
+  const option = page.getByRole('menuitemradio', { name: new RegExp(label, 'i') });
+  await option.waitFor({ timeout: 5000 });
+  await option.click();
+  await page.waitForFunction((expected) => document.documentElement.dataset.theme === expected, label.toLowerCase(), { timeout: 5000 });
+}
+async function assertNoHorizontalOverflow(where) {
+  const dimensions = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+    innerWidth: window.innerWidth,
+  }));
+  assert.ok(
+    dimensions.scrollWidth <= dimensions.innerWidth + 2,
+    `${where} has horizontal overflow: ${JSON.stringify(dimensions)}`,
+  );
+}
+async function screenshot(name, width = 1440) {
+  const target = path.join(artifactDir, name);
+  await page.screenshot({ path: target, fullPage: true });
+  const metadata = await sharp(target).metadata();
+  assert.equal(metadata.width, width, `${name} has unexpected width`);
+  return target;
+}
 
 before(async () => {
   await fsp.mkdir(artifactDir, { recursive: true });
-  if (!fs.existsSync(path.join(root, 'dist', 'index.html'))) {
-    execFileSync('npm', ['run', 'build'], { cwd: root, stdio: 'inherit' });
-  }
+  execFileSync('npm', ['run', 'build'], { cwd: root, stdio: 'inherit' });
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   env = {
@@ -104,6 +129,7 @@ before(async () => {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('requestfailed', (request) => failedRequests.push(`${request.url()}: ${request.failure()?.errorText || 'failed'}`));
+  page.on('response', (response) => { if (response.status() >= 400) httpErrors.push(`${response.status()} ${response.url()}`); });
 });
 
 after(async () => {
@@ -116,69 +142,167 @@ after(async () => {
   await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
 });
 
-test('production frontend renders, authenticates, navigates, and remains responsive', async (t) => {
-  await t.test('login page renders at desktop size without runtime errors', async () => {
+test('professional global website, themes, authentication, workspace, and responsiveness', async (t) => {
+  await t.test('public home renders with a complete menu and generated footer', async () => {
     const response = await page.goto(base, { waitUntil: 'networkidle' });
     assert.equal(response.status(), 200);
-    await page.getByRole('heading', { name: /Turn one idea into a complete faceless video campaign/i }).waitFor();
-    assert.equal(await page.locator('input[type="email"]').count(), 1);
-    const loginScreenshot = path.join(artifactDir, 'login-desktop.png');
-    await page.screenshot({ path: loginScreenshot, fullPage: true });
-    const metadata = await sharp(loginScreenshot).metadata();
-    assert.equal(metadata.width, 1440);
-    assert.ok(metadata.height >= 900);
+    await page.getByRole('heading', { level: 1, name: /Turn one idea into a complete publishing workflow/i }).waitFor();
+    await assertNoHorizontalOverflow('home desktop');
+    await screenshot('home-desktop.png');
+
+    await page.locator('.desktop-nav .nav-dropdown > summary').click();
+    const menuText = await page.locator('.mega-menu').innerText();
+    for (const item of PUBLIC_PAGES.filter((item) => item.path !== '/')) {
+      assert.ok(menuText.includes(item.label), `Explore menu is missing ${item.label}`);
+    }
+    assert.equal(await page.getByRole('menuitemradio').count(), 0);
+    assert.equal(await page.locator('.theme-option').count(), 0);
+    await page.locator('.desktop-nav .nav-dropdown > summary').click();
+
+    const footerText = await page.locator('.site-footer').innerText();
+    for (const item of PUBLIC_PAGES.filter((item) => item.path !== '/')) {
+      assert.ok(footerText.includes(item.label), `Footer is missing ${item.label}`);
+    }
+    assert.ok(await page.locator('.site-footer .footer-column a').count() >= PUBLIC_PAGES.length - 1);
   });
 
-  await t.test('seeded demo account signs in and the dashboard renders', async () => {
+  await t.test('contact form submits through the real backend endpoint', async () => {
+    await page.goto(`${base}/contact`, { waitUntil: 'networkidle' });
+    await page.getByLabel('Your name').fill('Visual QA');
+    await page.getByLabel('Email address').fill('visual-qa@faceless.local');
+    await page.getByLabel('What is this about?').selectOption('support');
+    await page.getByLabel('Message').fill('Please verify that the public contact form stores a real message and returns a reference.');
+    await page.getByRole('button', { name: /Send message/i }).click();
+    await page.getByRole('heading', { name: /Message received/i }).waitFor({ timeout: 10000 });
+    await page.getByText(/Reference:/i).waitFor();
+    await assertNoHorizontalOverflow('contact desktop');
+  });
+
+  await t.test('every public page and auth page works in Daylight and Aurora themes', async () => {
+    const routes = [...PUBLIC_PAGES.map((item) => item.path), '/login', '/signup'];
+    const themes = [
+      { label: 'Daylight', value: 'daylight' },
+      { label: 'Aurora', value: 'aurora' },
+    ];
+    assert.ok(PUBLIC_PAGES.length >= 20);
+    for (const theme of themes) {
+      await page.goto(base, { waitUntil: 'networkidle' });
+      await setTheme(theme.label);
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), theme.value);
+      for (const route of routes) {
+        const response = await page.goto(base + route, { waitUntil: 'networkidle' });
+        assert.equal(response.status(), 200, `${route} returned ${response.status()} in ${theme.label}`);
+        await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 8000 });
+        assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), theme.value, `${route} lost ${theme.label} theme`);
+        await assertNoHorizontalOverflow(`${route} in ${theme.label}`);
+        const text = await page.locator('body').innerText();
+        assert.ok(text.length > 200, `${route} rendered too little content in ${theme.label}`);
+        assert.doesNotMatch(text, /Application error|Something went wrong|Page wandered off-script/i, `${route} showed an error in ${theme.label}`);
+        if (route === '/pricing' && theme.value === 'daylight') await screenshot('pricing-daylight.png');
+        if (route === '/signup' && theme.value === 'aurora') await screenshot('signup-aurora.png');
+      }
+    }
+    await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+    await setTheme('Midnight');
+  });
+
+  await t.test('signup creates a real account and reaches the workspace', async () => {
+    await page.goto(`${base}/signup`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Create your workspace/i }).waitFor();
+    const email = `visual-signup-${Date.now()}@faceless.local`;
+    await page.getByLabel('Full name').fill('Visual QA User');
+    await page.getByLabel('Email address').fill(email);
+    await page.getByLabel('Create password', { exact: true }).fill('StudioSignup2026!');
+    await page.getByLabel('Confirm password').fill('StudioSignup2026!');
+    await page.getByRole('checkbox').check();
+    await page.getByRole('button', { name: /Create free account/i }).click();
+    await page.waitForURL('**/app', { timeout: 15000 });
+    await page.getByText(/Good to see you/i).waitFor({ timeout: 15000 });
+    await page.evaluate(async () => {
+      await fetch('/api/auth/logout', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' }, body: '{}',
+      });
+    });
+    // Leave the authenticated app shell immediately so its notification poller
+    // cannot issue an unauthenticated request before the next navigation.
+    await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+  });
+
+  await t.test('login page renders and seeded demo account signs in', async () => {
+    await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Sign in to your studio/i }).waitFor();
+    await assertNoHorizontalOverflow('login desktop');
+    await screenshot('login-desktop.png');
     await page.locator('input[type="email"]').fill(env.DEMO_EMAIL);
     await page.locator('input[type="password"]').fill(env.DEMO_PASSWORD);
     await page.getByRole('button', { name: /^Sign in$/ }).click();
     await page.waitForURL('**/app', { timeout: 15000 });
     await page.getByText(/Good to see you/i).waitFor({ timeout: 15000 });
     await page.getByText(/Videos generated/i).waitFor();
-    const dashboardScreenshot = path.join(artifactDir, 'dashboard-desktop.png');
-    await page.screenshot({ path: dashboardScreenshot, fullPage: true });
-    const metadata = await sharp(dashboardScreenshot).metadata();
-    assert.equal(metadata.width, 1440);
-    assert.ok(metadata.height >= 900);
+    await screenshot('dashboard-desktop.png');
   });
 
-  await t.test('major workspace routes mount without uncaught errors', async () => {
-    const routes = ['/app', '/app/studio', '/app/projects', '/app/accounts', '/app/calendar', '/app/publishing', '/app/analytics', '/app/settings', '/app/billing'];
+  await t.test('major workspace routes mount and the app theme switcher works', async () => {
+    const routes = ['/app', '/app/studio', '/app/projects', '/app/accounts', '/app/calendar', '/app/publishing', '/app/analytics', '/app/automation', '/app/settings', '/app/billing'];
     for (const route of routes) {
       const response = await page.goto(base + route, { waitUntil: 'networkidle' });
       assert.equal(response.status(), 200, `${route} returned ${response.status()}`);
       const text = await page.locator('body').innerText();
       assert.ok(text.length > 200, `${route} rendered too little content`);
-      assert.doesNotMatch(text, /Something went wrong|Page not found|Application error/i, `${route} showed an error state`);
+      assert.doesNotMatch(text, /Something went wrong|Page wandered off-script|Application error/i, `${route} showed an error state`);
+      await assertNoHorizontalOverflow(route);
     }
-    await page.goto(`${base}/app/studio`, { waitUntil: 'networkidle' });
-    await page.getByText('Create a faceless video campaign').waitFor();
+    await page.goto(`${base}/app`, { waitUntil: 'networkidle' });
+    for (const label of ['Daylight', 'Aurora']) {
+      await page.locator('.topbar .theme-trigger').click();
+      await page.getByRole('menuitemradio', { name: new RegExp(label, 'i') }).click();
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), label.toLowerCase());
+      await assertNoHorizontalOverflow(`workspace ${label}`);
+    }
+    await page.locator('.topbar .theme-trigger').click();
+    await page.getByRole('menuitemradio', { name: /Midnight/i }).click();
   });
 
-  await t.test('mobile dashboard has no horizontal overflow and captures a screenshot', async () => {
+  await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
+    for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {
+      await page.goto(base + route, { waitUntil: 'networkidle' });
+      await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 8000 });
+      await assertNoHorizontalOverflow(`mobile ${route}`);
+    }
+    await page.goto(base, { waitUntil: 'networkidle' });
+    await page.locator('.mobile-nav-toggle').click();
+    await page.locator('.mobile-nav-panel').waitFor();
+    const mobileMenu = await page.locator('.mobile-nav-panel').innerText();
+    for (const item of PUBLIC_PAGES.filter((item) => item.path !== '/')) {
+      assert.ok(mobileMenu.includes(item.label), `Mobile menu is missing ${item.label}`);
+    }
+    await page.locator('.mobile-nav-toggle').click();
     await page.goto(`${base}/app`, { waitUntil: 'networkidle' });
     await page.getByText(/Good to see you/i).waitFor({ timeout: 15000 });
-    const dimensions = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      clientWidth: document.documentElement.clientWidth,
-      innerWidth: window.innerWidth,
-    }));
-    assert.ok(dimensions.scrollWidth <= dimensions.innerWidth + 2, `Horizontal overflow: ${JSON.stringify(dimensions)}`);
-    const mobileScreenshot = path.join(artifactDir, 'dashboard-mobile.png');
-    await page.screenshot({ path: mobileScreenshot, fullPage: true });
-    const metadata = await sharp(mobileScreenshot).metadata();
-    assert.equal(metadata.width, 390);
-    assert.ok(metadata.height >= 844);
+    await screenshot('dashboard-mobile.png', 390);
   });
 
   await t.test('browser reports no uncaught page errors or unexpected failed requests', async () => {
     assert.deepEqual(pageErrors, []);
-    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico/i.test(message));
-    assert.deepEqual(unexpectedConsoleErrors, []);
-    const unexpectedFailedRequests = failedRequests.filter((message) => !/favicon\.ico/i.test(message));
-    assert.deepEqual(unexpectedFailedRequests, []);
-    console.log(JSON.stringify({ visualQa: 'passed', artifacts: ['test-artifacts/login-desktop.png', 'test-artifacts/dashboard-desktop.png', 'test-artifacts/dashboard-mobile.png'] }, null, 2));
+    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
+    assert.deepEqual(unexpectedConsoleErrors, [], `Unexpected console errors. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
+    const unexpectedFailedRequests = failedRequests.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
+    assert.deepEqual(unexpectedFailedRequests, [], `Unexpected failed requests. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
+    assert.deepEqual(httpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
+    console.log(JSON.stringify({
+      visualQa: 'passed',
+      publicPages: PUBLIC_PAGES.length,
+      themes: ['midnight', 'daylight', 'aurora', 'system'],
+      artifacts: [
+        'test-artifacts/home-desktop.png',
+        'test-artifacts/pricing-daylight.png',
+        'test-artifacts/signup-aurora.png',
+        'test-artifacts/login-desktop.png',
+        'test-artifacts/dashboard-desktop.png',
+        'test-artifacts/dashboard-mobile.png',
+      ],
+    }, null, 2));
   });
 });

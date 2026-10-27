@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Activity, AlertCircle, BarChart3, CheckCircle2, Cpu, KeyRound, ListChecks,
+  Activity, AlertCircle, BarChart3, CheckCircle2, Cpu, KeyRound, ListChecks, Mail,
   RefreshCw, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
 } from 'lucide-react';
 import { useLoad } from '../hooks.js';
@@ -15,6 +15,7 @@ const tabs = [
   { id: 'jobs', label: 'Jobs', icon: ListChecks },
   { id: 'integrations', label: 'Integrations', icon: Cpu },
   { id: 'logs', label: 'Audit logs', icon: ShieldCheck },
+  { id: 'messages', label: 'Messages', icon: Mail },
 ];
 
 function boolValue(value) { return value === true || value === 1 || value === 'true'; }
@@ -36,7 +37,7 @@ export default function Admin() {
     const endpoints = {
       overview: '/api/admin/overview', users: '/api/admin/users', plans: '/api/admin/plans',
       settings: '/api/admin/settings', jobs: '/api/admin/jobs', integrations: '/api/admin/integrations',
-      logs: '/api/admin/audit-logs',
+      logs: '/api/admin/audit-logs', messages: '/api/admin/contact-messages',
     };
     return get(endpoints[tab]);
   };
@@ -96,6 +97,7 @@ export default function Admin() {
   async function retryJob(id) { await action(() => post(`/api/admin/jobs/${id}/retry`, {}), 'Job retried.'); }
   async function cancelJob(id) { await action(() => post(`/api/admin/jobs/${id}/cancel`, {}), 'Job cancelled.'); }
   async function cleanup() { await action(() => post('/api/admin/cleanup', {}), 'Cleanup job queued.'); }
+  async function setContactStatus(id, status) { await action(() => patch(`/api/admin/contact-messages/${id}`, { status }), `Message marked ${status}.`); }
   async function sendBroadcast() {
     const result = await action(() => post('/api/admin/notifications/broadcast', broadcast), 'Broadcast sent.');
     if (result) setBroadcastOpen(false);
@@ -192,6 +194,24 @@ export default function Admin() {
                 </Card>
               </>}
               {tab === 'logs' && <Card title="Audit logs" icon={ShieldCheck}><div className="table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>User</th><th>Details</th></tr></thead><tbody>{(data?.logs || []).map((log) => <tr key={log.id}><td><small>{formatDate(log.createdAt)}</small></td><td>{log.action}</td><td>{log.entityType}<br /><small>{log.entityId}</small></td><td><small>{log.userId}</small></td><td><small className="mono">{JSON.stringify(log.details).slice(0, 120)}</small></td></tr>)}</tbody></table></div></Card>}
+              {tab === 'messages' && <Card title="Website messages" icon={Mail} subtitle="Messages submitted through the public contact form." action={<Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button>}>
+                {(data?.messages || []).length === 0 ? <EmptyState icon={Mail} title="No messages yet" description="Contact form submissions will appear here and notify administrators." /> : (
+                  <div className="contact-admin-list">{data.messages.map((message) => (
+                    <article className="contact-admin-item" key={message.id}>
+                      <div className="contact-admin-head">
+                        <div><strong>{message.topicLabel}</strong><span>{message.name} · <a href={`mailto:${message.email}`}>{message.email}</a> · {formatDate(message.createdAt)}</span></div>
+                        <span className={`contact-status ${message.status}`}>{message.status}</span>
+                      </div>
+                      <p>{message.message}</p>
+                      <div className="row row-wrap">
+                        <Button size="xs" variant="secondary" disabled={busy || message.status === 'reviewed'} onClick={() => setContactStatus(message.id, 'reviewed')}>Mark reviewed</Button>
+                        <Button size="xs" variant="ghost" disabled={busy || message.status === 'archived'} onClick={() => setContactStatus(message.id, 'archived')}>Archive</Button>
+                        <Button size="xs" variant="ghost" href={`mailto:${message.email}?subject=${encodeURIComponent(`Re: ${message.topicLabel}`)}`}>Reply by email</Button>
+                      </div>
+                    </article>
+                  ))}</div>
+                )}
+              </Card>}
             </>
           )}
         </div>

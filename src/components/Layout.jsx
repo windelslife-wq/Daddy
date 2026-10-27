@@ -1,26 +1,41 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
-  BarChart3, Bell, Bot, CalendarDays, CheckCheck, ChevronDown, CreditCard, FolderKanban,
-  LayoutDashboard, LogOut, Menu, Plus, Send, Settings, ShieldCheck, Sparkles, Users, X,
+  BarChart3, Bell, CheckCheck, ChevronDown, CreditCard, LogOut, Menu, Plus, Settings, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLoad } from '../hooks.js';
 import { get, post, formatDate, initials } from '../api.js';
+import { APP_PAGES, NAV_GROUPS, SITE } from '../config/site.js';
+import { Icon } from './Icon.jsx';
 import { Button, StatusBadge, useToast } from './ui.jsx';
+import { Footer } from './Footer.jsx';
+import { ThemeSwitcher } from './ThemeSwitcher.jsx';
 
-const mainNav = [
-  { to: '/app', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/app/studio', label: 'AI Studio', icon: Sparkles },
-  { to: '/app/projects', label: 'Projects', icon: FolderKanban },
-  { to: '/app/calendar', label: 'Calendar', icon: CalendarDays },
-  { to: '/app/automation', label: 'Autopilot', icon: Bot },
-  { to: '/app/publishing', label: 'Publishing', icon: Send },
-  { to: '/app/accounts', label: 'Accounts', icon: Users },
-  { to: '/app/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/app/billing', label: 'Plans', icon: CreditCard },
-  { to: '/app/settings', label: 'Settings', icon: Settings },
-];
+const mainNav = APP_PAGES.map((page) => ({
+  to: page.path,
+  label: page.label,
+  icon: page.icon,
+  admin: Boolean(page.admin),
+  end: page.path === '/app',
+}));
+
+function WebsiteMenu({ compact = false }) {
+  return (
+    <div className={compact ? 'app-explore-groups' : 'side-website-groups'}>
+      {NAV_GROUPS.map((group) => (
+        <div className={compact ? 'app-explore-group' : 'side-website-group'} key={group.id}>
+          <strong>{group.label}</strong>
+          {group.links.map((page) => (
+            <Link key={page.path} to={page.path} className={compact ? 'app-explore-link' : 'side-website-link'}>
+              <Icon name={page.icon} size={14} /><span>{page.label}</span>
+            </Link>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Layout() {
   const { user, plan, providerStatus, logout } = useAuth();
@@ -30,16 +45,19 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [websiteOpen, setWebsiteOpen] = useState(false);
   const { data, reload } = useLoad(() => get('/api/notifications'), [], { refreshMs: 30000, initial: { notifications: [], unread: 0 } });
   const notifications = data?.notifications || [];
   const unread = data?.unread || 0;
 
-  useEffect(() => { setMenuOpen(false); setProfileOpen(false); setNotificationsOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    setMenuOpen(false); setProfileOpen(false); setNotificationsOpen(false); setWebsiteOpen(false);
+  }, [location.pathname]);
 
-  const nav = useMemo(() => [
-    ...mainNav,
-    ...(user?.role === 'admin' ? [{ to: '/app/admin', label: 'Admin', icon: ShieldCheck }] : []),
-  ], [user?.role]);
+  const nav = useMemo(() => mainNav.filter((item) => !item.admin || user?.role === 'admin'), [user?.role]);
+  const currentPage = useMemo(() => [...nav]
+    .sort((a, b) => b.to.length - a.to.length)
+    .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)), [nav, location.pathname]);
 
   async function handleLogout() {
     try { await logout(); navigate('/login'); }
@@ -56,25 +74,35 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#workspace-content">Skip to workspace content</a>
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
-          <div className="brand-mark"><Sparkles size={20} /></div>
-          <div><strong>Faceless Studio</strong><span>AI content automation</span></div>
+          <div className="brand-mark"><Icon name="sparkles" size={20} /></div>
+          <div><strong>{SITE.name}</strong><span>AI content automation</span></div>
           <button className="icon-btn mobile-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={18} /></button>
         </div>
         <nav className="side-nav">
           <div className="nav-section">Workspace</div>
           {nav.slice(0, 8).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-              <item.icon size={18} /><span>{item.label}</span>
+              <Icon name={item.icon} size={18} /><span>{item.label}</span>
             </NavLink>
           ))}
           <div className="nav-section">Account</div>
           {nav.slice(8).map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-              <item.icon size={18} /><span>{item.label}</span>
+              <Icon name={item.icon} size={18} /><span>{item.label}</span>
             </NavLink>
           ))}
+          <div className="nav-section">Website</div>
+          <Link to="/" className="nav-link"><Icon name="home" size={18} /><span>Public home</span></Link>
+          <details className="side-website-nav" open={websiteOpen} onToggle={(event) => setWebsiteOpen(event.currentTarget.open)}>
+            <summary className="nav-link"><Icon name="globe" size={18} /><span>All site pages</span><Icon name="chevron-down" size={15} className="summary-chevron" /></summary>
+            <WebsiteMenu />
+          </details>
+          <Link to="/sitemap" className="nav-link"><Icon name="list-checks" size={18} /><span>Sitemap</span></Link>
+          <Link to="/help" className="nav-link"><Icon name="help" size={18} /><span>Help Center</span></Link>
+          <Link to="/contact" className="nav-link"><Icon name="mail" size={18} /><span>Contact</span></Link>
         </nav>
         <div className="sidebar-footer">
           <div className="provider-dot-row">
@@ -85,6 +113,7 @@ export default function Layout() {
             <span>{plan?.name || 'Free'} plan</span>
             <StatusBadge status={user?.role === 'admin' ? 'active' : 'connected'} label={user?.role === 'admin' ? 'Admin' : 'Member'} />
           </div>
+          <div className="sidebar-theme"><span>Appearance</span><ThemeSwitcher compact /></div>
         </div>
       </aside>
       {menuOpen && <button className="sidebar-scrim" aria-label="Close menu" onClick={() => setMenuOpen(false)} />}
@@ -94,9 +123,14 @@ export default function Layout() {
           <button className="icon-btn mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={20} /></button>
           <div className="topbar-title">
             <span className="topbar-kicker">Workspace</span>
-            <strong>{nav.find((item) => item.to === location.pathname)?.label || 'Faceless Studio'}</strong>
+            <strong>{currentPage?.label || SITE.name}</strong>
           </div>
           <div className="topbar-actions">
+            <details className="app-explore">
+              <summary className="btn btn-ghost btn-sm"><Icon name="globe" size={15} /> Website <ChevronDown size={13} /></summary>
+              <div className="app-explore-menu"><div className="app-explore-head"><strong>Complete site map</strong><span>All pages are available in your active theme.</span></div><WebsiteMenu compact /></div>
+            </details>
+            <ThemeSwitcher compact />
             <Button to="/app/studio" size="sm" variant="primary"><Plus size={16} /> New video</Button>
             <div className="popover-wrap">
               <button className="icon-btn notification-btn" onClick={() => setNotificationsOpen((v) => !v)} aria-label="Notifications">
@@ -137,17 +171,21 @@ export default function Layout() {
                   <div className="profile-popover-head"><strong>{user?.name}</strong><span>{user?.email}</span></div>
                   <NavLink to="/app/settings" className="popover-link"><Settings size={16} /> Settings</NavLink>
                   <NavLink to="/app/billing" className="popover-link"><CreditCard size={16} /> Plans & billing</NavLink>
+                  <Link to="/" className="popover-link"><Icon name="home" size={16} /> Public website</Link>
+                  <Link to="/help" className="popover-link"><Icon name="help" size={16} /> Help Center</Link>
+                  <div className="popover-theme-row"><span>Appearance</span><ThemeSwitcher compact /></div>
                   <button className="popover-link danger" onClick={handleLogout}><LogOut size={16} /> Sign out</button>
                 </div>
               )}
             </div>
           </div>
         </header>
-        <main className="page-content"><Outlet /></main>
+        <main id="workspace-content" className="page-content"><Outlet /></main>
+        <Footer compact />
         <nav className="mobile-bottom-nav">
           {nav.slice(0, 5).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? 'active' : ''}>
-              <item.icon size={19} /><span>{item.label.split(' ')[0]}</span>
+              <Icon name={item.icon} size={19} /><span>{item.label.split(' ')[0]}</span>
             </NavLink>
           ))}
         </nav>

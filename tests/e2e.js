@@ -315,6 +315,26 @@ try {
   const audit = await admin.request('/api/admin/audit-logs?limit=50');
   assert.ok(audit.data.logs.length >= 1);
 
+  const contactClient = makeClient();
+  const contact = await contactClient.request('/api/contact', {
+    method: 'POST',
+    body: {
+      name: 'E2E Contact', email: 'contact@e2e.local', topic: 'support',
+      message: 'Verify that a public website message is stored, listed, and can be reviewed by an administrator.',
+    },
+  });
+  assert.equal(contact.response.status, 201);
+  assert.ok(contact.data.reference);
+  const contactMessages = await admin.request('/api/admin/contact-messages');
+  assert.ok(contactMessages.data.messages.some((message) => message.id === contact.data.reference));
+  const reviewedMessage = await admin.request(`/api/admin/contact-messages/${contact.data.reference}`, { method: 'PATCH', body: { status: 'reviewed' } });
+  assert.equal(reviewedMessage.data.message.status, 'reviewed');
+  const invalidContact = await contactClient.request('/api/contact', {
+    method: 'POST', allowFailure: true,
+    body: { name: 'E2E', email: 'invalid', topic: 'support', message: 'short' },
+  });
+  assert.equal(invalidContact.response.status, 400);
+
   const accountToggle = await user.request(`/api/accounts/${sandboxAccount.id}`, { method: 'PATCH', body: { automationEnabled: false } });
   assert.equal(accountToggle.data.account.automationEnabled, false);
   await user.request(`/api/accounts/${sandboxAccount.id}`, { method: 'PATCH', body: { automationEnabled: true } });
@@ -329,7 +349,7 @@ try {
       'AI script + scenes + procedural images + local TTS + SRT + MP4 rendering',
       'automatic publishing', 'review + schedule + approval publishing', 'public media URLs',
       'duplicate prevention', 'metrics sync', 'recommendations', 'calendar',
-      'settings + billing config errors', 'admin endpoints', 'OAuth error handling',
+      'settings + billing config errors', 'admin endpoints', 'public contact form + admin messages', 'OAuth error handling',
     ],
   }, null, 2));
 } catch (error) {

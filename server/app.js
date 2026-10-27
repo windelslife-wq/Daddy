@@ -20,6 +20,7 @@ import { settingsRouter } from './routes/settings.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { billingRouter, stripeWebhookHandler } from './routes/billing.js';
 import { adminRouter } from './routes/admin.js';
+import { contactRouter } from './routes/contact.js';
 
 const distDir = path.join(config.root, 'dist');
 
@@ -83,6 +84,7 @@ export async function createApp() {
   app.use('/api/analytics', analyticsRouter());
   app.use('/api/billing', billingRouter());
   app.use('/api/admin', adminRouter());
+  app.use('/api/contact', contactRouter());
   app.use('/api', contentRouter());
 
   app.use('/api', (_req, res) => res.status(404).json({ error: { code: 'not_found', message: 'API endpoint not found.' } }));

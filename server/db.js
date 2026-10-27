@@ -239,6 +239,19 @@ export const tableDefinitions = {
     t.string('created_at', 40).notNullable();
     t.index(['user_id', 'created_at']);
   },
+  contact_messages: (t) => {
+    t.string('id', 48).primary();
+    t.string('name', 180).notNullable();
+    t.string('email', 320).notNullable();
+    t.string('topic', 80).notNullable();
+    t.text('message').notNullable();
+    t.string('status', 32).notNullable().defaultTo('new');
+    t.string('ip', 120);
+    t.text('user_agent');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.index(['status', 'created_at']);
+  },
   post_metrics: (t) => {
     t.string('id', 48).primary();
     t.string('publication_id', 48).notNullable().index();

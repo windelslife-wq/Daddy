@@ -22,7 +22,26 @@ This is **not a clickable UI demo**. The local preview works end to end without 
 | Metrics | Official adapters where available; sandbox metrics are explicitly labeled simulated |
 | Auth / security | Sessions, scrypt hashes, encrypted OAuth credentials, RBAC, quotas, same-origin checks |
 | Billing | Real server-side plan limits; Stripe checkout only when configured |
-| Frontend | Responsive React dashboard, studio, calendar, publishing, analytics, admin, settings |
+| Frontend | Responsive React global website, public/auth/app pages, four appearance themes, generated footer links, studio, calendar, publishing, analytics, admin, settings |
+
+---
+
+## Global professional website
+
+The root URL is a complete public product website, not a login redirect. Every public page is available in every appearance theme and is linked from the shared menu and generated footer.
+
+| Area | Pages |
+|---|---|
+| Product | Home, Features, Solutions, Pricing, Integrations |
+| Resources | Documentation, Help Center, Service Status, Security, Changelog, Sitemap |
+| Company | About, Contact, Careers, Press |
+| Legal & trust | Privacy, Terms, Cookies, Acceptable Use, Data Processing |
+| Account access | Dedicated `/login` and `/signup` pages |
+| Workspace | All existing `/app/*` application pages |
+
+`src/config/site.js` is the single source of truth for page metadata, header menus, the mobile menu, footer link generation, the sitemap, document titles, and route smoke tests. `src/context/ThemeContext.jsx` provides **System**, **Midnight**, **Daylight**, and **Aurora** themes. The chosen appearance is stored in local storage and applies consistently to marketing pages, authentication pages, application pages, and the footer. A theme switcher is available in the public header and footer, auth header and footer, and app topbar, sidebar, and profile menu.
+
+The public contact form is functional, not decorative. `POST /api/contact` validates and rate-limits submissions, applies a honeypot, stores messages in the `contact_messages` table, writes an audit event, and notifies active administrators. Administrators can review, mark reviewed, archive, or reply from **Admin → Messages**.
 
 ---
 
@@ -70,6 +89,8 @@ npm run doctor             # deployment / app-review readiness report
 npm run doctor -- --probe  # also checks the public health URL
 npm run doctor -- --json   # machine-readable readiness report
 ```
+
+`npm test` also validates the shared site map, menu coverage, generated footer coverage, and document titles. `npm run test:visual` builds the production frontend, checks all public pages plus login/signup in Daylight and Aurora themes, submits the real contact form, creates a real signup account, signs in, checks major workspace routes and the app theme switcher, and verifies mobile overflow and browser errors. Screenshots are written to `test-artifacts/`.
 
 The end-to-end test starts its own server and worker, verifies:
 
@@ -239,8 +260,14 @@ Key implementation details:
 - `server/publishers/*`: sandbox, Meta/Facebook/Instagram, YouTube, X adapters, token refresh, metrics, duplicate recovery.
 - `server/worker.js`: persistent job worker with conditional claims, stale recovery, retries, scheduler ticks.
 - `server/services/integrationReadiness.js`: deployment doctor, exact callback URLs, and provider app-review checklist.
+- `server/routes/contact.js`: validated public contact endpoint, rate limiting, honeypot, message storage, and admin notifications.
 - `server/oauth/*`: OAuth 2.0 / OAuth 1.0a flows and encrypted account storage.
-- `src/*`: responsive React dashboard and public sandbox viewer.
+- `src/config/site.js`: shared public site map used by menus, footer, sitemap, titles, and route QA.
+- `src/context/ThemeContext.jsx`: persistent System / Midnight / Daylight / Aurora appearance themes.
+- `src/components/PublicLayout.jsx`, `Footer.jsx`, `ThemeSwitcher.jsx`: professional global header, generated footer, mobile menu, and theme controls.
+- `src/pages/public/*`: product, resource, company, legal, pricing, contact, status, docs, and sitemap pages.
+- `src/pages/AuthPage.jsx`: dedicated login and signup experience with validation and password strength feedback.
+- `src/*`: responsive React application dashboard, studio, admin, and public sandbox viewer.
 
 Databases and generated files are stored under `data/` and `storage/` by default and are ignored by Git.
 
@@ -256,7 +283,7 @@ Databases and generated files are stored under `data/` and `storage/` by default
 6. Complete Meta App Review / Business Verification, Google OAuth consent verification, and X app permission review as required.
 7. Configure Stripe Price IDs and `STRIPE_WEBHOOK_SECRET`; point the Stripe webhook to `/api/billing/webhook`.
 8. Run `npm run build`, `npm run test:all`, and `npm run doctor -- --probe` in CI. The simulator suites verify official adapters without live credentials; they do not replace a final smoke test with approved real accounts.
-9. Monitor `/api/meta/health`, job failures, Admin → Overview production warnings, and Admin → Integrations readiness.
+9. Monitor `/api/meta/health`, job failures, Admin → Overview production warnings, Admin → Integrations readiness, and Admin → Messages for contact-form submissions.
 10. Respect platform automation, copyright, community, and rate-limit rules. Review factual niches before enabling full autopilot.
 
 ---
