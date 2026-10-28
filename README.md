@@ -1,6 +1,6 @@
 # Faceless Studio
 
-A full-stack, production-oriented AI **faceless video creation and social media automation** platform. It creates original short-form videos from a niche or custom topic, renders a real MP4, generates narration/captions/music/thumbnails, schedules platform-specific posts, publishes through official APIs when configured, retries safely, and measures results.
+A full-stack, production-oriented AI **filmmaking and social media automation** platform. It creates short dramas, long dramas, episodic series and movies scene by scene with real AI video providers, assembles them into playable MP4 films with voices, subtitles and music, and also supports the original faceless-video workflow: scripts, original visuals, narration, rendering, scheduling and official social publishing.
 
 This is **not a clickable UI demo**. The local preview works end to end without paid services: a persistent job worker generates scripts, original procedural scene art, local TTS, SRT subtitles, an FFmpeg-rendered H.264/AAC MP4, a thumbnail, platform captions, and a post to a built-in local HTTP sandbox publisher. Official Facebook, Instagram, YouTube, and X publishing adapters are implemented and **activate only when valid server credentials are configured**.
 
@@ -23,6 +23,34 @@ This is **not a clickable UI demo**. The local preview works end to end without 
 | Auth / security | Sessions, scrypt hashes, encrypted OAuth credentials, RBAC, quotas, same-origin checks |
 | Billing | Real server-side plan limits; Stripe checkout only when configured |
 | Frontend | Responsive React global website, public/auth/app pages, four appearance themes, generated footer links, studio, calendar, publishing, analytics, admin, settings |
+| AI filmmaking | Short drama, long drama, movie and episodic-series projects; story bibles; recurring cast; scene-by-scene real AI video jobs; per-scene regeneration; FFmpeg assembly; subtitles; credits ledger; installable PWA |
+
+---
+
+## AI Filmmaking Studio
+
+`/app/films` is a professional, resumable film production workspace — **not a demo and not a basic one-shot video generator**.
+
+- **Four formats in one ecosystem:** Short Drama, Long Drama & Movie Studio, Series & Episodes, plus standalone AI Script Writer, Character Studio, Scene Generator, Voice & Audio Studio, Movie Editor, My Projects, My Media, Published Movies and Credits & Subscriptions.
+- **Workflow:** idea or reference image → format → genre/language/duration/style/platform → screenplay & dialogue → characters with visual references → real AI scene clips → voices/SFX/music/subtitles → scene arrangement & editing → preview → export/download/save/publish. Every step persists, so you can resume a saved project at any time.
+- **Long-form is scene-by-scene.** AI video models produce short clips (default 10s max, 120 scenes max). A movie is assembled from many real clips into one MP4. No request pretends to generate a feature-length film in one call.
+- **Review and regenerate only the scenes you dislike.** Failed jobs, provider errors, progress and remaining credits are always visible. Credits are estimated before expensive work, reserved before a job, and refunded automatically on failure.
+- **Requires real providers for real AI video.** Set `FILM_VIDEO_PROVIDER=replicate|fal|veo` plus its server-side key. With `FILM_VIDEO_PROVIDER=none`, scene generation is disabled with a clear `503` — the platform never fabricates a clip or simulates provider progress. See **[docs/FILMMAKING.md](docs/FILMMAKING.md)** for provider setup, model overrides, generation limits, commercial-use notes, credit pricing, the full API, PWA/mobile scope and features needing paid services.
+
+Quick start:
+
+```bash
+# 1. Configure ONE real AI video provider (server-side only)
+FILM_VIDEO_PROVIDER=replicate
+REPLICATE_API_TOKEN=r8_...
+# 2. Optional: genuine AI screenwriting instead of a labelled local template
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+# 3. Start the app (worker must be enabled)
+npm run dev
+```
+
+Then open **Film Studio Hub → New project**, or go straight to **AI Script Writer**.
 
 ---
 
@@ -74,6 +102,113 @@ npm start
 ```
 
 For a multi-process deployment, run one or more dedicated workers with the same database and `WORKER_ENABLED=true`; use PostgreSQL via `DATABASE_URL`.
+
+---
+
+## Activating external integrations
+
+Every module is implemented and contract-tested offline. The remaining work is
+**activation** — adding credentials, obtaining provider approval, and deploying
+infrastructure. The setup wizard walks through those modules one by one without
+ever contacting a provider or printing a secret:
+
+```bash
+npm run setup                            # status table, then pick a module
+npm run setup -- --list                  # all 15 modules and their status
+npm run setup -- --check                 # offline preflight report
+npm run --silent setup -- --check --json # machine-readable report
+npm run setup -- --next                  # open the first unfinished module
+npm run setup -- --module facebook-pages # open a specific module
+npm run setup -- --generate-key          # generate APP_ENCRYPTION_KEY
+npm run setup -- --set KEY=VALUE         # non-interactive value entry
+npm run setup -- --verify                # live-verify all configured credentials
+npm run setup -- --verify stripe         # live-verify one module
+npm run setup -- --work 1                # one-by-one: live state + exact next actions
+npm run setup -- --work all --record     # verify all 15 and record the results
+npm run setup -- --work all --record --progress  # regenerate the live progress tracker
+npm run setup -- --confirm smtp --note "SPF/DKIM verified, ticket 4471"
+npm run setup -- --unconfirm smtp        # undo a mistaken attestation
+npm run activate -- --list               # remaining modules, dependency order
+KEY=value npm run activate -- smtp       # one-by-one: configure, verify, record
+npm run deploy:check -- --origin https://studio.example.com
+npm run db:bootstrap                     # real Postgres + two-worker claim proof
+```
+
+`--work <id|number|all>` is the one-by-one completion runner: it merges offline
+preflight, live verification and the completion audit into a single work item
+showing which criteria are met, **who owns each remaining one** (this repo,
+server environment, deployment, provider console, or real production usage),
+the exact environment keys, callback URLs and commands. `--record` persists the
+verification result in the app DB and audit-logs it. `--confirm` is a human
+**attestation** that the external console/deploy steps were genuinely done — it
+requires a note, is audit-logged, and is never run automatically. The live
+per-module tracker is **[docs/ACTIVATION_PROGRESS.md](docs/ACTIVATION_PROGRESS.md)**.
+
+`--verify` is the only networked command: it makes read-only, app-level calls
+to configured providers (Meta client-credentials, Google token endpoint,
+X app-only token, Stripe `/v1/account`, OpenAI/Anthropic/Gemini model lists,
+Brave/Tavily, Replicate, ElevenLabs, the public health endpoint, a signed
+webhook ping, SMTP, and PostgreSQL). Unconfigured modules are skipped; module
+15 stays `MANUAL` because only a provider reviewer can approve it. No secret is
+ever printed, and provider error text is scrubbed of configured values. The
+same data is exposed at **Admin → Activation** (`GET /api/admin/activation`,
+`POST /api/admin/activation/:id/verify`), with a Verify button per module.
+
+### Knowing when a module is actually done
+
+`GET /api/admin/activation/audit` (and **Admin → Activation → Completion
+criteria**) gives each module an explicit definition of done, checked against
+real application state rather than environment variables alone:
+
+- local configuration, and a **recorded successful verification**;
+- **evidence**: connected accounts with the required scopes, published posts
+  with remote links, non-simulated official metrics, Stripe Price IDs on every
+  paid plan, processed signed webhooks, generated provider output, and stored
+  credentials that still decrypt with the current key;
+- **manual steps confirmed** — Meta App Review, Google consent screen, X API
+  tier, Stripe activation and DNS/TLS cannot be verified from code, so an admin
+  ticks them off via `POST /api/admin/activation/:id/confirm`.
+
+Verification results and manual confirmations persist in application settings
+and are audit-logged. Module 15 stays manual until a live post from a non-team
+account has produced official metrics.
+
+For each module the wizard prints the exact callback URLs, required
+permissions/scopes, provider-console steps, deployment steps, and verification
+checklist, then prompts for the environment values with input hidden for
+secrets. Values are format-validated before being written to a gitignored
+`.env` (mode `0600`); comments in an existing file are preserved and duplicate
+keys are never created. The wizard refuses to write a value that `dotenv`
+cannot read back exactly, rather than silently corrupting a secret.
+
+The full, generated checklist lives in **[docs/ACTIVATION.md](docs/ACTIVATION.md)**
+(regenerate with `npm run setup:runbooks`), and the live state of every module
+is in **[docs/ACTIVATION_PROGRESS.md](docs/ACTIVATION_PROGRESS.md)** (regenerate
+with `npm run --silent setup -- --work all --record --progress`). Recommended
+dependency order:
+
+1. `encryption-key` — can be completed entirely offline (`--generate-key`).
+2. `public-https-origin`, `postgres` — deployment infrastructure; OAuth and
+   Instagram publishing depend on the HTTPS origin.
+3. `ai-providers`, `research`, `image-providers`, `tts-providers` — optional
+   upgrades; already `READY` with the offline `local` / `none` / `procedural` /
+   `mespeak` defaults, and their verifiers pass offline.
+4. `smtp`, `notification-webhook` — delivery channels.
+5. `facebook-pages`, `instagram-reels`, `youtube`, `x`, `stripe` — credentials
+   plus provider-console approval plus live publishing evidence.
+6. `app-review` — the final, external approval gate (Meta, Google, X, Stripe).
+
+**Why the last five cannot be finished from this repository:** each needs real
+third-party credentials, a public HTTPS deployment, provider reviewer
+decisions, a connected non-team account and at least one live published post
+with official metrics. The code, adapters, tests and audit criteria are all in
+place; the remaining criteria are deliberately owned by a human so the
+completion audit cannot be faked.
+
+`npm run doctor` remains the deployment-readiness report; the wizard is the
+step-by-step path to getting there. Simulator test results are never presented
+as live provider posts — finish with a real smoke test using an account that is
+**not** an app admin/developer/tester.
 
 ---
 
@@ -286,6 +421,25 @@ Databases and generated files are stored under `data/` and `storage/` by default
 9. Monitor `/api/meta/health`, job failures, Admin → Overview production warnings, Admin → Integrations readiness, and Admin → Messages for contact-form submissions.
 10. Respect platform automation, copyright, community, and rate-limit rules. Review factual niches before enabling full autopilot.
 
+### Ready-to-run production stack
+
+**[deploy/README.md](deploy/README.md)** implements activation modules 12 and 13
+with a real `Dockerfile`, `docker-compose.yml` (API + `--scale worker=2` +
+PostgreSQL + Caddy automatic HTTPS), `deploy/Caddyfile`, a dedicated
+`server/worker-standalone.js`, and two verification commands:
+
+```bash
+cp .env.example .env && chmod 600 .env      # set DOMAIN, POSTGRES_PASSWORD, APP_ENCRYPTION_KEY
+docker compose up -d --build --scale worker=2
+npm run db:bootstrap                        # real Postgres schema + two-worker claim proof
+npm run deploy:check -- --origin https://studio.example.com --json
+```
+
+`deploy:check` runs from **outside** the host and performs a real DNS lookup,
+TLS handshake (CN/issuer/expiry), public `/api/meta/health` probe, secure-cookie
+inspection, signed-media fetch and callback-route probe. It never fakes a
+result and exits non-zero on any failure.
+
 ---
 
 ## Important limitations
@@ -296,3 +450,7 @@ Databases and generated files are stored under `data/` and `storage/` by default
 - SQLite is suitable for local/single-node use. PostgreSQL is recommended when running multiple API/worker processes.
 - Local TTS and procedural visuals are functional but intentionally simpler than paid generative models.
 - No distributed transaction can atomically commit an external post and a local database row; idempotency keys, reference codes, provider-side duplicate scans, and conditional claims minimize duplicate risk.
+- **AI filmmaking needs a paid video provider.** With `FILM_VIDEO_PROVIDER=none`, no AI clip can be produced; the platform refuses rather than fabricating one. Provider models, queues, regional access, watermarking and commercial rights are controlled by Replicate, Fal.ai and Google — review their current terms before distributing content.
+- Long movies are assembled from many short clips. Character identity across clips is best-effort via consistent appearance prompts; guaranteed identity locking and lip-sync require provider support and are not claimed where unavailable.
+- The mobile experience is an **installable responsive PWA**, not a native App Store / Play Store app. Native wrappers, push notifications and in-app purchases are not implemented.
+- Purchasable credit packs are not implemented: signup grants follow the subscription plan; Stripe billing manages plans. Adding paid credit top-ups requires Price IDs and a webhook → ledger integration.

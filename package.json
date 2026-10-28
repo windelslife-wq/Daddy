@@ -17,7 +17,13 @@
     "test:e2e": "node tests/e2e.js",
     "test:visual": "npm run build && node --test tests/visual.js",
     "doctor": "node scripts/doctor.js",
-    "test:all": "npm test && npm run test:e2e && npm run test:visual"
+    "setup": "node scripts/setup.js",
+    "setup:runbooks": "node scripts/setup.js --runbooks",
+    "test:all": "npm test && npm run test:e2e && npm run test:visual",
+    "worker": "node server/worker-standalone.js",
+    "activate": "node scripts/activate.mjs",
+    "deploy:check": "node scripts/deploy-check.mjs",
+    "db:bootstrap": "node scripts/db-bootstrap.mjs"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
@@ -50,6 +56,7 @@
     "pg-mem": "^3.0.14",
     "playwright-core": "^1.64.1",
     "smtp-server": "^3.21.1",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "yaml": "^2.9.1"
   }
 }

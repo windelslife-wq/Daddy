@@ -6,7 +6,7 @@ import {
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLoad } from '../hooks.js';
 import { get, post, formatDate, initials } from '../api.js';
-import { APP_PAGES, NAV_GROUPS, SITE } from '../config/site.js';
+import { APP_PAGES, FILM_PAGES, NAV_GROUPS, SITE } from '../config/site.js';
 import { Icon } from './Icon.jsx';
 import { Button, StatusBadge, useToast } from './ui.jsx';
 import { Footer } from './Footer.jsx';
@@ -55,9 +55,9 @@ export default function Layout() {
   }, [location.pathname]);
 
   const nav = useMemo(() => mainNav.filter((item) => !item.admin || user?.role === 'admin'), [user?.role]);
-  const currentPage = useMemo(() => [...nav]
-    .sort((a, b) => b.to.length - a.to.length)
-    .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)), [nav, location.pathname]);
+  const currentPage = useMemo(() => [...nav.map((item) => ({ ...item, path: item.to })), ...FILM_PAGES]
+    .sort((a, b) => b.path.length - a.path.length)
+    .find((item) => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`)), [nav, location.pathname]);
 
   async function handleLogout() {
     try { await logout(); navigate('/login'); }
@@ -85,6 +85,12 @@ export default function Layout() {
           <div className="nav-section">Workspace</div>
           {nav.slice(0, 8).map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+              <Icon name={item.icon} size={18} /><span>{item.label}</span>
+            </NavLink>
+          ))}
+          <div className="nav-section">AI Filmmaking</div>
+          {FILM_PAGES.map((item) => (
+            <NavLink key={item.path} to={item.path} end={item.path === '/app/films'} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
               <Icon name={item.icon} size={18} /><span>{item.label}</span>
             </NavLink>
           ))}

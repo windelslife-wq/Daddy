@@ -1,0 +1,408 @@
+/**
+ * AI Filmmaking REST API.
+ * All provider credentials stay on the server. No endpoint returns a secret.
+ */
+import express from 'express';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import multer from 'multer';
+import { z } from 'zod';
+import { db, now, json, parseJson, number } from '../db.js';
+import { config } from '../config.js';
+import { requireAuth } from '../auth.js';
+import { asyncHandler, badRequest, notFound, forbidden, AppError } from '../errors.js';
+import { contentType, projectDir } from '../media/utils.js';
+import {
+  FILM_TYPES, FILM_GENRES, FILM_STYLES, FILM_ASPECTS, FILM_PLATFORMS,
+  generateScreenplay, filmLimits, planSceneCount, normaliseEditedScreenplay,
+} from '../film/screenplay.js';
+import { providerStatus } from '../film/videoProviders.js';
+import { estimateFilm, estimateFromScreenplay, getBalance, creditHistory } from '../film/credits.js';
+import {
+  createFilmSchema, patchFilmSchema, patchSceneSchema, characterSchema,
+  createFilm, listFilms, updateFilm, deleteFilm, saveScreenplay, filmDetail,
+  listScenes, updateScene, addScene, deleteScene, reorderScenes,
+  listCharacters, upsertCharacter, deleteCharacter,
+  requestSceneGeneration, requestAllScenes, requestAssembly, publishFilm,
+  ownedFilm,
+} from '../film/scenes.js';
+import { assemblyPreflight } from '../film/assembly.js';
+import {
+  seriesSchema, episodeSchema, patchEpisodeSchema, EPISODE_STATUSES,
+  createSeries, listSeries, seriesDetail, updateSeries, deleteSeries,
+  createEpisode, updateEpisode, deleteEpisode, generateEpisodeScreenplay, bulkCreateEpisodes,
+} from '../film/series.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 } });
+
+/** Converts Zod validation errors into friendly 400s instead of opaque 500s. */
+function h(fn) {
+  return asyncHandler(async (req, res, next) => {
+    try { return await fn(req, res, next); }
+    catch (error) {
+      if (error?.name === 'ZodError') {
+        throw badRequest('Please correct the highlighted fields.', error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })));
+      }
+      throw error;
+    }
+  });
+}
+
+const screenplayRequestSchema = z.object({
+  idea: z.string().trim().min(3).max(4000),
+  type: z.enum(FILM_TYPES).optional().default('short_drama'),
+  genre: z.string().max(60).optional().default('drama'),
+  language: z.string().max(12).optional().default('en'),
+  style: z.string().max(60).optional().default('cinematic'),
+  aspectRatio: z.enum(FILM_ASPECTS).optional().default('9:16'),
+  platform: z.string().max(40).optional().default('tiktok'),
+  targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional().default(60),
+  storyBible: z.record(z.any()).optional().default({}),
+  characters: z.array(z.any()).max(20).optional().default([]),
+  previousEpisodes: z.array(z.any()).max(30).optional().default([]),
+  allowTemplate: z.boolean().optional().default(true),
+});
+
+const estimateSchema = z.object({
+  scenes: z.array(z.object({
+    duration_seconds: z.number().min(1).max(60),
+    dialogue: z.array(z.object({ line: z.string().max(1000) })).max(20).optional().default([]),
+  })).max(config.film.maxScenes).optional(),
+  screenplay: z.any().optional(),
+  targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional(),
+  assembly: z.boolean().optional().default(true),
+});
+
+const uploadKindSchema = z.object({
+  kind: z.enum(['reference', 'music', 'character']),
+  characterId: z.string().max(48).optional(),
+});
+
+async function streamFile(req, res, filePath, filename, { download = false } = {}) {
+  if (!filePath || !fs.existsSync(filePath)) throw notFound('Media file not found.');
+  const stat = await fsp.stat(filePath);
+  res.setHeader('Content-Type', contentType(filename));
+  res.setHeader('Accept-Ranges', 'bytes');
+  if (download) {
+    const safe = path.basename(filename).replace(/["\r\n]/g, '');
+    res.setHeader('Content-Disposition', `attachment; filename="${safe}"`);
+  }
+  const range = req.get('range');
+  if (range) {
+    const match = /bytes=(\d+)-(\d*)/.exec(range);
+    const start = match ? Number(match[1]) : 0;
+    const end = match && match[2] ? Number(match[2]) : stat.size - 1;
+    if (start >= stat.size || end >= stat.size || start > end) {
+      res.status(416).setHeader('Content-Range', `bytes */${stat.size}`);
+      return res.end();
+    }
+    res.status(206).setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+    res.setHeader('Content-Length', String(end - start + 1));
+    return fs.createReadStream(filePath, { start, end }).pipe(res);
+  }
+  res.setHeader('Content-Length', String(stat.size));
+  return fs.createReadStream(filePath).pipe(res);
+}
+
+export function filmRouter() {
+  const router = express.Router();
+  router.use(requireAuth);
+
+  // ---- Static configuration / discovery -----------------------------------
+  router.get('/config', h(async (req, res) => {
+    const [balance, provider] = await Promise.all([getBalance(req.user.id), Promise.resolve(providerStatus())]);
+    res.json({
+      types: FILM_TYPES, genres: FILM_GENRES, styles: FILM_STYLES,
+      aspectRatios: FILM_ASPECTS, platforms: FILM_PLATFORMS,
+      languages: ['en', 'es', 'fr', 'de', 'pt', 'it', 'nl', 'pl', 'tr', 'zh', 'ha', 'yo', 'ig', 'sw', 'ar', 'hi'],
+      voices: ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer', 'sage', 'eleven-default'],
+      limits: filmLimits(),
+      credits: {
+        balance,
+        perVideoSecond: config.film.creditPerVideoSecond,
+        perTtsThousandChars: config.film.creditPerTtsThousandChars,
+        perAssembly: config.film.creditPerAssembly,
+      },
+      aiScreenplayProvider: config.ai.provider,
+      aiScreenplayConfigured: config.ai.provider !== 'local',
+      ttsProvider: config.media.ttsProvider,
+      videoProvider: provider,
+    });
+  }));
+
+  router.post('/estimate', h(async (req, res) => {
+    const data = estimateSchema.parse(req.body || {});
+    let scenes = data.scenes;
+    if (!scenes && data.screenplay) scenes = data.screenplay.scenes || [];
+    if (!scenes && data.targetDurationSeconds) {
+      const count = planSceneCount(data.targetDurationSeconds);
+      scenes = Array.from({ length: count }, () => ({ duration_seconds: config.film.maxSceneSeconds, dialogue: [] }));
+    }
+    if (!scenes) throw badRequest('Provide scenes, a screenplay, or targetDurationSeconds.');
+    const estimate = estimateFilm(scenes, { assembly: data.assembly });
+    const balance = await getBalance(req.user.id);
+    res.json({ ...estimate, balance, sufficient: balance >= estimate.total, shortfall: Math.max(0, estimate.total - balance) });
+  }));
+
+  // Standalone AI Script Writer (no project needed).
+  router.post('/screenplay', h(async (req, res) => {
+    const data = screenplayRequestSchema.parse(req.body || {});
+    const screenplay = await generateScreenplay(data);
+    res.json({ screenplay, estimate: estimateFromScreenplay(screenplay), provider: screenplay.provider, aiGenerated: screenplay.aiGenerated });
+  }));
+
+  // ---- Credits -------------------------------------------------------------
+  router.get('/credits', h(async (req, res) => {
+    const [balance, history] = await Promise.all([getBalance(req.user.id), creditHistory(req.user.id, 50)]);
+    res.json({ balance, history, pricing: {
+      perVideoSecond: config.film.creditPerVideoSecond,
+      perTtsThousandChars: config.film.creditPerTtsThousandChars,
+      perAssembly: config.film.creditPerAssembly,
+    } });
+  }));
+
+  router.get('/credits/history', h(async (req, res) => {
+    res.json({ history: await creditHistory(req.user.id, number(req.query.limit, 50)) });
+  }));
+
+  // ---- Character studio ----------------------------------------------------
+  router.get('/characters', h(async (req, res) => {
+    res.json({ characters: await listCharacters(req.user.id, { filmId: req.query.filmId, seriesId: req.query.seriesId }) });
+  }));
+
+  router.post('/characters', h(async (req, res) => {
+    const data = characterSchema.parse(req.body || {});
+    if (data.filmId) await ownedFilm(req.user.id, data.filmId, req.user.role);
+    res.status(201).json({ character: await upsertCharacter(req.user.id, data) });
+  }));
+
+  router.delete('/characters/:characterId', h(async (req, res) => {
+    res.json(await deleteCharacter(req.user.id, req.params.characterId));
+  }));
+
+  router.get('/characters/:characterId/image', h(async (req, res) => {
+    const character = await db('film_characters').where({ id: req.params.characterId, user_id: req.user.id }).first();
+    if (!character) throw notFound('Character not found.');
+    if (req.user.role !== 'admin' && character.user_id !== req.user.id) throw forbidden();
+    await streamFile(req, res, character.reference_image_path, 'reference.png');
+  }));
+
+  // ---- Series studio (defined before /:id to avoid shadowing) --------------
+  router.get('/series', h(async (req, res) => res.json({ series: await listSeries(req.user.id) })));
+
+  router.post('/series', h(async (req, res) => {
+    const data = seriesSchema.parse(req.body || {});
+    res.status(201).json({ series: await createSeries(req.user.id, data) });
+  }));
+
+  router.post('/series/bulk-episodes', h(async (req, res) => {
+    const data = z.object({ seriesId: z.string().min(1), seasonNumber: z.number().int().min(1).max(100).default(1), titles: z.array(z.string().min(1).max(220)).min(1).max(50) }).parse(req.body || {});
+    res.status(201).json({ episodes: await bulkCreateEpisodes(req.user.id, data.seriesId, data, req.user.role) });
+  }));
+
+  router.get('/series/:seriesId', h(async (req, res) => res.json(await seriesDetail(req.user.id, req.params.seriesId, req.user.role))));
+
+  router.patch('/series/:seriesId', h(async (req, res) => {
+    res.json(await updateSeries(req.user.id, req.params.seriesId, seriesSchema.partial().parse(req.body || {}), req.user.role));
+  }));
+
+  router.delete('/series/:seriesId', h(async (req, res) => {
+    res.json(await deleteSeries(req.user.id, req.params.seriesId, req.user.role));
+  }));
+
+  router.post('/series/:seriesId/episodes', h(async (req, res) => {
+    const data = episodeSchema.parse(req.body || {});
+    res.status(201).json({ episode: await createEpisode(req.user.id, req.params.seriesId, data, req.user.role) });
+  }));
+
+  router.patch('/series/:seriesId/episodes/:episodeId', h(async (req, res) => {
+    const data = patchEpisodeSchema.parse(req.body || {});
+    res.json({ episode: await updateEpisode(req.user.id, req.params.seriesId, req.params.episodeId, data, req.user.role) });
+  }));
+
+  router.delete('/series/:seriesId/episodes/:episodeId', h(async (req, res) => {
+    res.json(await deleteEpisode(req.user.id, req.params.seriesId, req.params.episodeId, req.user.role));
+  }));
+
+  router.post('/series/:seriesId/episodes/:episodeId/screenplay', h(async (req, res) => {
+    const options = z.object({
+      idea: z.string().max(4000).optional(),
+      targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional(),
+      allowTemplate: z.boolean().optional().default(true),
+    }).parse(req.body || {});
+    res.json(await generateEpisodeScreenplay(req.user.id, req.params.seriesId, req.params.episodeId, options, req.user.role));
+  }));
+
+  // ---- Projects ------------------------------------------------------------
+  router.get('/', h(async (req, res) => {
+    const films = await listFilms(req.user.id, {
+      type: req.query.type, seriesId: req.query.seriesId, status: req.query.status,
+      limit: number(req.query.limit, 50), offset: number(req.query.offset, 0),
+    });
+    res.json({ films });
+  }));
+
+  router.post('/', h(async (req, res) => {
+    const data = createFilmSchema.parse(req.body || {});
+    res.status(201).json({ film: await createFilm(req.user.id, data) });
+  }));
+
+  router.get('/:id', h(async (req, res) => res.json(await filmDetail(req.user.id, req.params.id, req.user.role))));
+
+  router.patch('/:id', h(async (req, res) => {
+    const data = patchFilmSchema.parse(req.body || {});
+    res.json({ film: await updateFilm(req.user.id, req.params.id, data, req.user.role) });
+  }));
+
+  router.delete('/:id', h(async (req, res) => {
+    res.json(await deleteFilm(req.user.id, req.params.id, req.user.role));
+  }));
+
+  // ---- Screenplay within a project ----------------------------------------
+  router.post('/:id/screenplay', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const data = screenplayRequestSchema.parse(req.body || {});
+    const screenplay = await generateScreenplay({
+      ...data,
+      type: film.type,
+      genre: data.genre || film.genre,
+      language: data.language || film.language,
+      style: data.style || film.style,
+      aspectRatio: film.aspect_ratio,
+      platform: film.target_platform,
+      targetDurationSeconds: data.targetDurationSeconds || film.target_duration_seconds,
+      storyBible: Object.keys(data.storyBible || {}).length ? data.storyBible : parseJson(film.story_bible, {}),
+      characters: data.characters?.length ? data.characters : await listCharacters(req.user.id, { filmId: film.id, seriesId: film.series_id || undefined }),
+    });
+    const detail = await saveScreenplay(req.user.id, film.id, screenplay, req.user.role);
+    res.json({ screenplay, provider: screenplay.provider, aiGenerated: screenplay.aiGenerated, film: detail });
+  }));
+
+  router.put('/:id/screenplay', h(async (req, res) => {
+    const data = z.object({ screenplay: z.any() }).parse(req.body || {});
+    normaliseEditedScreenplay(data.screenplay);
+    res.json(await saveScreenplay(req.user.id, req.params.id, data.screenplay, req.user.role));
+  }));
+
+  // ---- Scenes --------------------------------------------------------------
+  router.get('/:id/scenes', h(async (req, res) => {
+    res.json({ scenes: await listScenes(req.user.id, req.params.id, req.user.role) });
+  }));
+
+  router.post('/:id/scenes', h(async (req, res) => {
+    res.status(201).json({ scene: await addScene(req.user.id, req.params.id, patchSceneSchema.parse(req.body || {}), req.user.role) });
+  }));
+
+  router.post('/:id/scenes/reorder', h(async (req, res) => {
+    const data = z.object({ orderedIds: z.array(z.string().min(1)).min(1) }).parse(req.body || {});
+    res.json({ scenes: await reorderScenes(req.user.id, req.params.id, data.orderedIds, req.user.role) });
+  }));
+
+  router.post('/:id/scenes/generate-all', h(async (req, res) => {
+    res.json(await requestAllScenes(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.get('/:id/preflight', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const pre = await assemblyPreflight(req.params.id);
+    const scenes = await db('film_scenes').where({ film_id: req.params.id });
+    const cost = estimateFilm(scenes.map((s) => ({ duration_seconds: number(s.duration_seconds), dialogue: parseJson(s.dialogue, []) })), { assembly: false });
+    res.json({
+      sceneCount: pre.sceneCount, durationSeconds: pre.duration,
+      missing: pre.missing, ready: pre.ready, ttsProvider: pre.ttsProvider,
+      assemblyCredits: cost.total + config.film.creditPerAssembly,
+      balance: await getBalance(req.user.id),
+    });
+  }));
+
+  router.post('/:id/scenes/:sceneId/generate', h(async (req, res) => {
+    res.status(202).json({ scene: await requestSceneGeneration(req.user.id, req.params.id, req.params.sceneId, req.user.role) });
+  }));
+
+  router.patch('/:id/scenes/:sceneId', h(async (req, res) => {
+    res.json({ scene: await updateScene(req.user.id, req.params.id, req.params.sceneId, patchSceneSchema.parse(req.body || {}), req.user.role) });
+  }));
+
+  router.delete('/:id/scenes/:sceneId', h(async (req, res) => {
+    res.json(await deleteScene(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/clip', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const scene = await db('film_scenes').where({ id: req.params.sceneId, film_id: req.params.id }).first();
+    if (!scene) throw notFound('Scene not found.');
+    await streamFile(req, res, scene.clip_path, `scene-${number(scene.ordinal)}.mp4`);
+  }));
+
+  router.get('/:id/scenes/:sceneId/poster', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const scene = await db('film_scenes').where({ id: req.params.sceneId, film_id: req.params.id }).first();
+    if (!scene) throw notFound('Scene not found.');
+    await streamFile(req, res, scene.poster_path, `poster-${number(scene.ordinal)}.jpg`);
+  }));
+
+  // ---- Assembly / export ---------------------------------------------------
+  router.post('/:id/assemble', h(async (req, res) => {
+    const data = z.object({ subtitles: z.boolean().optional().default(true) }).parse(req.body || {});
+    res.status(202).json(await requestAssembly(req.user.id, req.params.id, data, req.user.role));
+  }));
+
+  router.get('/:id/media/:asset', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const map = {
+      video: [film.final_video_path, `${film.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.mp4`],
+      thumbnail: [film.thumbnail_path, 'thumbnail.jpg'],
+      captions: [film.caption_path, 'captions.srt'],
+      reference: [film.reference_image_path, 'reference.png'],
+      music: [film.music_path, 'music.mp3'],
+    };
+    const entry = map[req.params.asset];
+    if (!entry) throw badRequest('Unknown media asset.');
+    await streamFile(req, res, entry[0], entry[1], { download: req.query.download === '1' || ['captions', 'music'].includes(req.params.asset) });
+  }));
+
+  router.get('/:id/download', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const name = `${film.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'film'}.mp4`;
+    await streamFile(req, res, film.final_video_path, name, { download: true });
+  }));
+
+  router.post('/:id/publish', h(async (req, res) => {
+    res.json({ film: await publishFilm(req.user.id, req.params.id, req.user.role) });
+  }));
+
+  // ---- Secure uploads ------------------------------------------------------
+  router.post('/:id/upload', upload.single('file'), h(async (req, res) => {
+    const data = uploadKindSchema.parse(req.body || {});
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    if (!req.file) throw badRequest('Choose a file to upload.');
+    const isImage = ['image/png', 'image/jpeg', 'image/webp'].includes(req.file.mimetype);
+    const isAudio = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/ogg', 'audio/webm'].includes(req.file.mimetype);
+    if (data.kind !== 'music' && !isImage) throw badRequest('Reference and character images must be PNG, JPEG, or WebP.');
+    if (data.kind === 'music' && !isAudio) throw badRequest('Music must be MP3, WAV, M4A, OGG, or WebM audio.');
+    if (data.kind !== 'music' && req.file.size > config.film.maxReferenceImageMb * 1024 * 1024) {
+      throw badRequest(`Images must be under ${config.film.maxReferenceImageMb} MB.`);
+    }
+    const dir = path.join(projectDir(`film_${film.id}`), 'assets');
+    await fsp.mkdir(dir, { recursive: true });
+    const ext = data.kind === 'music' ? (req.file.mimetype.includes('wav') ? 'wav' : 'mp3') : (req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg');
+    const filename = `${data.kind}-${Date.now()}.${ext}`;
+    const destination = path.join(dir, filename);
+    await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    if (data.kind === 'reference') {
+      await db('film_projects').where({ id: film.id }).update({ reference_image_path: destination, updated_at: now() });
+    } else if (data.kind === 'music') {
+      await db('film_projects').where({ id: film.id }).update({ music_path: destination, updated_at: now() });
+      await db('film_projects').where({ id: film.id }).update({ status: film.status === 'completed' ? 'draft' : film.status });
+    } else {
+      if (!data.characterId) throw badRequest('characterId is required for character images.');
+      const character = await db('film_characters').where({ id: data.characterId, user_id: req.user.id }).first();
+      if (!character) throw notFound('Character not found.');
+      await db('film_characters').where({ id: character.id }).update({ reference_image_path: destination, updated_at: now() });
+    }
+    res.status(201).json({ uploaded: true, kind: data.kind, filename, bytes: req.file.size });
+  }));
+
+  return router;
+}

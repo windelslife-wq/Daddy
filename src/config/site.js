@@ -66,6 +66,24 @@ export const APP_PAGES = [
   { path: '/app/admin', label: 'Admin', icon: 'shield', admin: true },
 ];
 
+// Dedicated AI filmmaking navigation. These are real working destinations,
+// not placeholders: each one reaches a functional tool or filtered workspace.
+export const FILM_PAGES = [
+  { path: '/app/films', label: 'Film Studio Hub', icon: 'clapperboard' },
+  { path: '/app/films/short', label: 'Short Drama Studio', icon: 'smartphone' },
+  { path: '/app/films/long', label: 'Long Drama & Movie', icon: 'film' },
+  { path: '/app/films/series', label: 'Series & Episodes', icon: 'layers' },
+  { path: '/app/films/scripts', label: 'AI Script Writer', icon: 'pen-line' },
+  { path: '/app/films/characters', label: 'Character Studio', icon: 'users' },
+  { path: '/app/films/scenes', label: 'Scene Generator', icon: 'wand-sparkles' },
+  { path: '/app/films/audio', label: 'Voice & Audio', icon: 'mic2' },
+  { path: '/app/films/editor', label: 'Movie Editor', icon: 'scissors' },
+  { path: '/app/films/projects', label: 'My Projects', icon: 'folder' },
+  { path: '/app/films/media', label: 'My Media', icon: 'image' },
+  { path: '/app/films/published', label: 'Published Movies', icon: 'send' },
+  { path: '/app/films/credits', label: 'Credits & Subscriptions', icon: 'credit-card' },
+];
+
 export const ALL_PUBLIC_LINKS = PUBLIC_PAGES.map((page) => ({ ...page, href: page.path }));
 
 export function pageForPath(pathname) {

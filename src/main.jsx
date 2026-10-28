@@ -7,6 +7,14 @@ import { ThemeProvider } from './context/ThemeContext.jsx';
 import { ToastProvider } from './components/ui.jsx';
 import './styles.css';
 
+// Installable PWA: register only in production builds so Vite HMR stays clean.
+// The service worker caches the app shell only; API/media responses are never cached.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  });
+}
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
