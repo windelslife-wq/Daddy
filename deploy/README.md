@@ -43,8 +43,40 @@ Set these in `.env`:
 
 Compose sets `PUBLIC_BASE_URL=https://$DOMAIN`, `DATABASE_URL`, `TRUST_PROXY=true`
 and the worker flags for you. Keep `APP_ENCRYPTION_KEY` stable — rotating it
-makes stored OAuth tokens unreadable (the setup wizard now refuses to rotate
+makes stored OAuth tokens unreadable (the setup wizard refuses to rotate
 silently).
+
+### Prepare module 14: credential encryption key
+
+Do not generate a production key in a temporary development workspace. Once the
+production host and secret storage are chosen:
+
+1. If you already have encrypted credentials that must be retained, recover
+   and use their existing key. A newly generated key cannot decrypt them.
+2. Otherwise, on the production host, run `npm run setup -- --generate-key`
+   from the repository root. This requires the project dependencies to be
+   installed and writes the key to the gitignored `.env`. Do not print it,
+   commit it, or share it in chat.
+3. Store the same key in your deployment's secret manager and make a secure,
+   separate backup. Ensure the app and every worker receive the **same** key
+   and that it survives restarts and redeployments. For the Compose stack,
+   provide it in the host environment or the host's protected `.env` file.
+4. After deployment, run `npm run setup -- --work encryption-key --record`
+   in an environment connected to the deployment database and configured with
+   that same key. Restart the service and test existing connected accounts.
+5. Only after verifying the secret storage, backup, and deployment steps,
+   record the human attestation with:
+
+   ```bash
+   npm run activate -- encryption-key --attest "<completed deployment steps>"
+   ```
+
+   Check the module audit rather than assuming that generating a key alone
+   completes the module.
+
+If the key is lost or replaced, existing encrypted OAuth credentials cannot be
+recovered with the new key; affected accounts must be reconnected. Preserve
+and protect the original key alongside the relevant database backup.
 
 ## 2. Deploy
 

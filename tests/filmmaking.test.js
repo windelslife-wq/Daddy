@@ -182,6 +182,21 @@ test('credit estimates are exact and reservations are idempotent', async () => {
   assert.equal(post.data.balance, beforeBalance - 7);
 });
 
+test('credit mutations roll back rejected reservations and preserve idempotent replays', async () => {
+  const balance = await getBalance(userId);
+  const key = `test-rejected:${crypto.randomUUID()}`;
+  await assert.rejects(applyCredit(userId, -(balance + 1), 'test', { idempotencyKey: key }),
+    (error) => error.code === 'insufficient_credits');
+  assert.equal(await getBalance(userId), balance);
+  assert.equal(await db('credit_ledger').where({ idempotency_key: key }).first(), undefined);
+  const accepted = await applyCredit(userId, 1, 'test', { idempotencyKey: key });
+  const replay = await applyCredit(userId, 1, 'test', { idempotencyKey: key });
+  assert.equal(accepted.applied, true);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.amount, 0);
+  assert.equal(await getBalance(userId), balance + 1);
+});
+
 test('insufficient credits are rejected before any provider call', async () => {
   const before = await getBalance(userId);
   const huge = await req('/api/films/estimate', {

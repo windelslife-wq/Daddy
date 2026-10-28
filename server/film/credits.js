@@ -56,25 +56,31 @@ export async function applyCredit(userId, amount, reason, {
   if (existing) return { balance: await getBalance(userId), applied: false, amount: 0 };
 
   let balance = 0;
+  let applied = false;
   try {
     await db.transaction(async (trx) => {
       const again = await trx('credit_ledger').where({ idempotency_key: idempotencyKey }).first();
       if (again) { balance = number((await trx('credit_accounts').where({ user_id: userId }).first())?.balance); return; }
-      const account = await trx('credit_accounts').where({ user_id: userId }).first();
-      const next = number(account?.balance) + Number(amount);
-      if (!allowNegative && next < 0) {
-        const error = new AppError(402, 'insufficient_credits', `This operation needs ${Math.abs(Number(amount))} credits but your balance is ${number(account?.balance)}. Add credits or reduce the project size.`);
-        error.balance = number(account?.balance);
-        error.required = Math.abs(Number(amount));
-        throw error;
-      }
+      // Insert first so duplicate idempotency keys roll the entire transaction back.
       await trx('credit_ledger').insert({
         id: newId('crd_'), user_id: userId, amount: Number(amount), reason,
         reference_type: referenceType, reference_id: referenceId,
         idempotency_key: idempotencyKey, metadata: json(metadata), created_at: now(),
       });
-      await trx('credit_accounts').where({ user_id: userId }).update({ balance: next, updated_at: now() });
-      balance = next;
+      // A database-side conditional update serializes distinct concurrent changes
+      // without a read/modify/write race, including competing reservations.
+      let update = trx('credit_accounts').where({ user_id: userId });
+      if (!allowNegative) update = update.whereRaw('balance + ? >= 0', [Number(amount)]);
+      const changed = await update.update({ balance: trx.raw('balance + ?', [Number(amount)]), updated_at: now() });
+      const account = await trx('credit_accounts').where({ user_id: userId }).first();
+      if (!changed) {
+        const error = new AppError(402, 'insufficient_credits', `This operation needs ${Math.abs(Number(amount))} credits but your balance is ${number(account?.balance)}. Add credits or reduce the project size.`);
+        error.balance = number(account?.balance);
+        error.required = Math.abs(Number(amount));
+        throw error;
+      }
+      balance = number(account?.balance);
+      applied = true;
     });
   } catch (error) {
     // Two workers may race on the same idempotency key. The loser must treat
@@ -85,7 +91,7 @@ export async function applyCredit(userId, amount, reason, {
     }
     throw error;
   }
-  return { balance, applied: true, amount: Number(amount) };
+  return { balance, applied, amount: applied ? Number(amount) : 0 };
 }
 
 export const reserveCredits = (userId, amount, options) => applyCredit(userId, -Math.abs(amount), 'scene_reserve', options);
