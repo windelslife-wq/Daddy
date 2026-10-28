@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { NAV_GROUPS, PRIMARY_NAV, SITE } from '../config/site.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -11,9 +11,23 @@ function NavIcon({ name }) {
 }
 
 function ExploreMenu({ mobile = false }) {
+  const detailsRef = useRef(null);
+  const { pathname } = useLocation();
+  useEffect(() => { if (detailsRef.current) detailsRef.current.open = false; }, [pathname]);
+  useEffect(() => {
+    const close = (event) => {
+      const details = detailsRef.current;
+      if (!details?.open) return;
+      if (event.type === 'keydown' && event.key === 'Escape') { details.open = false; details.querySelector('summary')?.focus(); }
+      if (event.type === 'pointerdown' && !details.contains(event.target)) details.open = false;
+    };
+    document.addEventListener('keydown', close);
+    document.addEventListener('pointerdown', close);
+    return () => { document.removeEventListener('keydown', close); document.removeEventListener('pointerdown', close); };
+  }, []);
   if (!mobile) {
     return (
-      <details className="nav-dropdown">
+      <details className="nav-dropdown" ref={detailsRef}>
         <summary aria-label="Explore all pages">Explore <Icon name="chevron-down" size={14} /></summary>
         <div className="mega-menu">
           <div className="mega-menu-intro">
@@ -63,6 +77,13 @@ export function PublicLayout({ children = null }) {
     setMobileOpen(false);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return undefined;
+    const onKeyDown = (event) => { if (event.key === 'Escape') setMobileOpen(false); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen]);
 
   useEffect(() => {
     document.body.classList.toggle('nav-open', mobileOpen);

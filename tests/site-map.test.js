@@ -21,7 +21,8 @@ test('public site map is complete and internally consistent', () => {
     assert.ok(NAV_GROUPS.some((group) => group.id === page.group), `${page.path} has an unknown group`);
   }
   assert.equal(PUBLIC_PAGES.filter((page) => page.path === '/').length, 1, 'Exactly one home page is required');
-  assert.equal(PRIMARY_NAV.length, 4);
+  assert.equal(PRIMARY_NAV.length, 5);
+  assert.ok(PRIMARY_NAV.some((page) => page.path === '/filmmaking'));
   assert.ok(PRIMARY_NAV.every(Boolean));
 });
 

@@ -36,6 +36,9 @@ export function Footer({ compact = false }) {
         <div className="footer-bottom">
           <span>© {new Date().getFullYear()} {SITE.name}. All rights reserved.</span>
           <div className="footer-bottom-links">
+            <Link to="/login">Sign in</Link>
+            <Link to="/signup">Create account</Link>
+            <Link to="/sitemap">Workspace &amp; site map</Link>
             <Link to="/status"><span className="status-pulse" /> Service status</Link>
             <a href={`mailto:${SITE.email}`}><Icon name="mail" size={13} /> {SITE.email}</a>
             <ThemeSwitcher compact align="left" />

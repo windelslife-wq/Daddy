@@ -21,9 +21,12 @@ function passwordScore(value) {
 }
 
 function safeDestination(value) {
-  if (!value || typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/app';
-  if (value === '/login' || value === '/signup' || value === '/') return '/app';
-  return value;
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f]/.test(value)) return '/app';
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || !(url.pathname === '/app' || url.pathname.startsWith('/app/'))) return '/app';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch { return '/app'; }
 }
 
 function PasswordToggle({ visible, onClick }) {
@@ -50,11 +53,13 @@ export default function AuthPage({ mode = 'login' }) {
   const [demoBusy, setDemoBusy] = useState(false);
   const score = useMemo(() => passwordScore(form.password), [form.password]);
   const demo = providerStatus?.demoCredentials;
+  const authLink = (path) => destination === '/app' ? path : `${path}?next=${encodeURIComponent(destination)}`;
 
   const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.type === 'checkbox' ? event.target.checked : event.target.value }));
 
   const submit = async (event) => {
     event.preventDefault();
+    if (busy || demoBusy) return;
     setError(null);
     const email = form.email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError(new Error('Enter a valid email address.'));
@@ -84,7 +89,7 @@ export default function AuthPage({ mode = 'login' }) {
     setDemoBusy(true);
     try {
       await login(demo.email, demo.password);
-      navigate('/app', { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err);
     } finally {
@@ -92,7 +97,8 @@ export default function AuthPage({ mode = 'login' }) {
     }
   };
 
-  if (!loading && authenticated) return <Navigate to={destination} replace />;
+  if (loading) return <div className="full-loader" role="status"><Spinner size={22} /> Checking your session…</div>;
+  if (authenticated) return <Navigate to={destination} replace />;
 
   return (
     <div className="auth-site">
@@ -129,11 +135,11 @@ export default function AuthPage({ mode = 'login' }) {
               <h2>{isSignup ? 'Create your workspace' : 'Sign in to your studio'}</h2>
               <p>{isSignup ? 'Set up your account and validate the complete local workflow in minutes.' : 'Continue your projects, schedules, and publishing operations.'}</p>
             </div>
-            <div className="auth-tabs" role="tablist" aria-label="Account access">
-              <Link to={`/login${searchParams.get('next') ? `?next=${encodeURIComponent(searchParams.get('next'))}` : ''}`} role="tab" aria-selected={!isSignup} className={!isSignup ? 'active' : ''}><Icon name="login" size={15} /> Sign in</Link>
-              <Link to="/signup" role="tab" aria-selected={isSignup} className={isSignup ? 'active' : ''}><Icon name="user-plus" size={15} /> Create account</Link>
-            </div>
-            <ErrorBanner error={error} />
+            <nav className="auth-tabs" aria-label="Account access">
+              <Link to={authLink('/login')} aria-current={!isSignup ? 'page' : undefined} className={!isSignup ? 'active' : ''}><Icon name="login" size={15} /> Sign in</Link>
+              <Link to={authLink('/signup')} aria-current={isSignup ? 'page' : undefined} className={isSignup ? 'active' : ''}><Icon name="user-plus" size={15} /> Create account</Link>
+            </nav>
+            <div role="alert" aria-live="assertive"><ErrorBanner error={error} /></div>
             <form className="auth-form" onSubmit={submit} noValidate>
               {isSignup && (
                 <label className="form-label">Full name
@@ -152,11 +158,11 @@ export default function AuthPage({ mode = 'login' }) {
                     <div className="strength-bars">{[1, 2, 3, 4].map((step) => <span key={step} className={score >= step ? 'filled' : ''} />)}</div>
                     <span>{form.password ? STRENGTH_LABELS[score] : 'Use at least 10 characters'}</span>
                   </div>
-                  <div className="password-rules">
+                  <div className="password-rules" aria-label="Password suggestions">
                     <span className={form.password.length >= 10 ? 'met' : ''}><Icon name="check" size={12} /> 10+ characters</span>
-                    <span className={/[a-z]/.test(form.password) && /[A-Z]/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Upper & lowercase</span>
-                    <span className={/\d/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Number</span>
-                    <span className={/[^A-Za-z0-9]/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Symbol</span>
+                    <span className={/[a-z]/.test(form.password) && /[A-Z]/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Upper & lowercase (optional)</span>
+                    <span className={/\d/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Number (optional)</span>
+                    <span className={/[^A-Za-z0-9]/.test(form.password) ? 'met' : ''}><Icon name="check" size={12} /> Symbol (optional)</span>
                   </div>
                   <label className="form-label">Confirm password
                     <span className="input-with-icon"><Icon name="lock" size={16} /><input className="input" type={showConfirm ? 'text' : 'password'} value={form.confirm} onChange={update('confirm')} autoComplete="new-password" placeholder="Repeat your password" required maxLength={128} /><PasswordToggle visible={showConfirm} onClick={() => setShowConfirm((value) => !value)} /></span>
@@ -173,12 +179,12 @@ export default function AuthPage({ mode = 'login' }) {
                   <Link to="/help">Need account help?</Link>
                 </div>
               )}
-              <button type="submit" className="btn btn-primary btn-lg auth-submit" disabled={busy}>
+              <button type="submit" className="btn btn-primary btn-lg auth-submit" disabled={busy || demoBusy}>
                 {busy ? <><Spinner size={16} /> {isSignup ? 'Creating workspace…' : 'Signing in…'}</> : <>{isSignup ? 'Create free account' : 'Sign in'} <Icon name="arrow-right" size={16} /></>}
               </button>
             </form>
             <div className="auth-switch">
-              {isSignup ? <>Already have an account? <Link to="/login">Sign in</Link></> : <>New to Faceless Studio? <Link to="/signup">Create an account</Link></>}
+              {isSignup ? <>Already have an account? <Link to={authLink('/login')}>Sign in</Link></> : <>New to Faceless Studio? <Link to={authLink('/signup')}>Create an account</Link></>}
             </div>
             {demo?.email && demo?.password && (
               <>

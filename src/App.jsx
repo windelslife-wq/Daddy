@@ -9,6 +9,7 @@ import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
 import Home from './pages/public/Home.jsx';
 import Features from './pages/public/Features.jsx';
+import Filmmaking from './pages/public/Filmmaking.jsx';
 import Solutions from './pages/public/Solutions.jsx';
 import Pricing from './pages/public/Pricing.jsx';
 import About from './pages/public/About.jsx';
@@ -65,7 +66,7 @@ function ProtectedLayout() {
   const { loading, authenticated } = useAuth();
   const location = useLocation();
   if (loading) return <div className="full-loader"><Loader2 className="spin" size={28} /><span>Loading your workspace…</span></div>;
-  if (!authenticated) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!authenticated) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />;
   return <Layout />;
 }
 
@@ -109,6 +110,7 @@ export default function App() {
         </Route>
         <Route element={<PublicLayout />}>
           <Route path="/" element={<Home />} />
+          <Route path="/filmmaking" element={<Filmmaking />} />
           <Route path="/features" element={<Features />} />
           <Route path="/solutions" element={<Solutions />} />
           <Route path="/pricing" element={<Pricing />} />

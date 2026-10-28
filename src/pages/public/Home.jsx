@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon.jsx';
 import { CTASection, FeatureCard, MetricStrip, PageHero, Section, StepList } from '../../components/Marketing.jsx';
 
 const features = [
+  { icon: 'clapperboard', title: 'AI filmmaking studio', description: 'Develop short dramas, films and series scene by scene, from story and characters to an assembled production.', to: '/filmmaking' },
   { icon: 'wand-sparkles', title: 'Idea to complete video', description: 'Generate a script, scene plan, narration, captions, soundtrack, and MP4 from one topic or niche.', to: '/features' },
   { icon: 'send', title: 'Official publishing', description: 'Connect supported accounts and publish through platform APIs with review gates and retry-safe records.', to: '/integrations' },
   { icon: 'bot', title: 'Autopilot with control', description: 'Schedule recurring series, enforce daily limits, and require human approval before anything goes live.', to: '/features' },

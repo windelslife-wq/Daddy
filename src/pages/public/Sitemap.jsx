@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { APP_PAGES, NAV_GROUPS, PUBLIC_PAGES } from '../../config/site.js';
+import { APP_PAGES, FILM_PAGES, NAV_GROUPS, PUBLIC_PAGES } from '../../config/site.js';
 import { Icon } from '../../components/Icon.jsx';
 import { CTASection, PageHero, Section } from '../../components/Marketing.jsx';
 
@@ -33,6 +33,9 @@ export default function Sitemap() {
         <div className="sitemap-app-grid">
           {APP_PAGES.map((page) => <Link key={page.path} to={page.path}><Icon name={page.icon} size={16} /><span>{page.label}</span><code>{page.path}</code></Link>)}
         </div>
+      </Section>
+      <Section eyebrow="AI filmmaking" title="Film Studio tools" description="Explore the tools for scripts, scenes, characters, editing, and production. These destinations require an account.">
+        <div className="sitemap-app-grid">{FILM_PAGES.map((page) => <Link key={page.path} to={page.path}><Icon name={page.icon} size={16} /><span>{page.label}</span><code>{page.path}</code></Link>)}</div>
       </Section>
       <Section eyebrow="Coverage" title={`${PUBLIC_PAGES.length} public pages across every theme`} description="The active appearance theme is stored once and applied to public pages, authentication pages, application pages, and the footer." align="center">
         <div className="three-up-grid">
