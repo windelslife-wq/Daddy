@@ -7,7 +7,7 @@ import {
   GraduationCap, Headphones, Heart, Home, Image, Info, KeyRound, Languages, Layers, LayoutDashboard, LifeBuoy,
   Lightbulb, Link2, ListChecks, Loader2, Lock, LockKeyhole, LogIn, Mail, MailCheck, Megaphone, Menu, MessageCircle,
   Mic2, Monitor, MonitorPlay, Moon, Music, Newspaper, Palette, PenLine, Play, Plug, Puzzle, Radio, Repeat2, Rocket,
-  Scale, Search, Send, Server, Settings, Share2, Shield, ShieldCheck, Smartphone, Sparkle, Sparkles, Store, Sun,
+  Scale, Scissors, Search, Send, Server, Settings, Share2, Shield, ShieldCheck, Smartphone, Sparkle, Sparkles, Store, Sun,
   Target, Terminal, TrendingUp, Upload, User, UserPlus, Users, Video, WandSparkles, Webhook, Workflow, X, Zap,
 } from 'lucide-react';
 
@@ -24,7 +24,8 @@ const ICONS = {
   home: Home, image: Image, info: Info, key: KeyRound, languages: Languages, layers: Layers,
   'layout-dashboard': LayoutDashboard, 'life-buoy': LifeBuoy, lightbulb: Lightbulb, link: Link2,
   'list-checks': ListChecks, loader: Loader2, lock: Lock, 'lock-keyhole': LockKeyhole, login: LogIn, mail: Mail,
-  'mail-check': MailCheck, megaphone: Megaphone, menu: Menu, 'message-circle': MessageCircle, mic: Mic2,
+  'mail-check': MailCheck, megaphone: Megaphone, menu: Menu, 'message-circle': MessageCircle, mic: Mic2, mic2: Mic2,
+  scissors: Scissors,
   monitor: Monitor, 'monitor-play': MonitorPlay, moon: Moon, music: Music, newspaper: Newspaper,
   palette: Palette, 'pen-line': PenLine, play: Play, plug: Plug, puzzle: Puzzle, radio: Radio, repeat: Repeat2,
   rocket: Rocket, scale: Scale, search: Search, send: Send, server: Server, settings: Settings, share: Share2, user: User,

@@ -8,6 +8,7 @@ import { generateRecommendations } from './services/analytics.js';
 import { tickScheduler } from './services/scheduler.js';
 import { createAutopilotProject } from './services/projects.js';
 import { generateAutopilotTopic } from './ai.js';
+import { processFilmSceneJob, processFilmAssemblyJob } from './film/scenes.js';
 
 const workerId = `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 let interval = null;
@@ -120,6 +121,10 @@ async function processJob(job) {
       return syncPublicationMetrics(payload.publicationId);
     case 'generate_recommendations':
       return generateRecommendations(payload.userId);
+    case 'film_generate_scene':
+      return processFilmSceneJob(payload);
+    case 'film_assemble':
+      return processFilmAssemblyJob(payload);
     case 'autopilot_generate': {
       const niche = await db('niches').where({ id: payload.nicheId }).first();
       const topic = niche ? await generateAutopilotTopic({ ...niche, config: parseJson(niche.config, {}) }) : null;

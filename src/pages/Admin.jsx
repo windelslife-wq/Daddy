@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Activity, AlertCircle, BarChart3, CheckCircle2, Cpu, KeyRound, ListChecks, Mail,
-  RefreshCw, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
+  RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
 } from 'lucide-react';
 import { useLoad } from '../hooks.js';
 import { get, patch, post, put, formatDate, formatNumber } from '../api.js';
@@ -14,6 +14,7 @@ const tabs = [
   { id: 'settings', label: 'Global settings', icon: SettingsIcon },
   { id: 'jobs', label: 'Jobs', icon: ListChecks },
   { id: 'integrations', label: 'Integrations', icon: Cpu },
+  { id: 'activation', label: 'Activation', icon: Rocket },
   { id: 'logs', label: 'Audit logs', icon: ShieldCheck },
   { id: 'messages', label: 'Messages', icon: Mail },
 ];
@@ -21,6 +22,12 @@ const tabs = [
 function boolValue(value) { return value === true || value === 1 || value === 'true'; }
 function readinessTone(status) {
   return { pass: 'completed', warn: 'needs_review', fail: 'failed', external: 'processing' }[status] || 'draft';
+}
+function activationTone(status) {
+  return { ready: 'completed', incomplete: 'needs_review', external: 'processing' }[status] || 'draft';
+}
+function verifyTone(status) {
+  return { verified: 'completed', invalid: 'failed', unreachable: 'failed', unconfigured: 'needs_review', unsupported: 'processing' }[status] || 'draft';
 }
 
 export default function Admin() {
@@ -33,15 +40,50 @@ export default function Admin() {
   const [newPlan, setNewPlan] = useState({ name: '', priceCents: 0, maxVideosMonth: 20, maxRenderSecondsMonth: 1800, maxPostsMonth: 100, maxAccounts: 5, maxProjects: 100, features: '', active: true, stripePriceId: '' });
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [broadcast, setBroadcast] = useState({ title: '', body: '', type: 'info', actionUrl: '/app' });
+  const [verifyResults, setVerifyResults] = useState({});
+  const [verifying, setVerifying] = useState(null);
+  const [confirming, setConfirming] = useState(null);
   const loader = () => {
     const endpoints = {
       overview: '/api/admin/overview', users: '/api/admin/users', plans: '/api/admin/plans',
       settings: '/api/admin/settings', jobs: '/api/admin/jobs', integrations: '/api/admin/integrations',
+      activation: '/api/admin/activation',
       logs: '/api/admin/audit-logs', messages: '/api/admin/contact-messages',
     };
     return get(endpoints[tab]);
   };
   const { data, loading, error, reload } = useLoad(loader, [tab], { refreshMs: tab === 'overview' || tab === 'jobs' ? 15000 : 0 });
+
+  const auditLoad = useLoad(() => (tab === 'activation' ? get('/api/admin/activation/audit') : Promise.resolve(null)), [tab], { initial: null });
+  const audit = tab === 'activation' ? auditLoad.data : null;
+  const auditById = Object.fromEntries((audit?.modules || []).map((a) => [a.id, a]));
+
+  const verifyActivation = async (id) => {
+    setVerifying(id);
+    try {
+      const result = await post(`/api/admin/activation/${encodeURIComponent(id)}/verify`);
+      setVerifyResults((prev) => ({ ...prev, [id]: result }));
+      showToast(`${result.name}: ${result.status}`, result.status === 'verified' ? 'success' : result.status === 'invalid' || result.status === 'unreachable' ? 'error' : 'info');
+      await auditLoad.reload({ silent: true }).catch(() => {});
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setVerifying(null);
+    }
+  };
+
+  const confirmActivation = async (id, confirmed) => {
+    setConfirming(id);
+    try {
+      await post(`/api/admin/activation/${encodeURIComponent(id)}/confirm`, { confirmed, note: confirmed ? 'Confirmed in Admin → Activation' : '' });
+      showToast(confirmed ? 'Manual steps marked done.' : 'Confirmation removed.', 'success');
+      await auditLoad.reload({ silent: true }).catch(() => {});
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setConfirming(null);
+    }
+  };
 
   useEffect(() => {
     if (tab === 'users' && data?.users) {
@@ -173,7 +215,7 @@ export default function Admin() {
                 <div className="table-wrap"><table><thead><tr><th>Type</th><th>Status</th><th>Attempts</th><th>Run at</th><th>Error</th><th className="text-right">Actions</th></tr></thead><tbody>{(data?.jobs || []).map((job) => <tr key={job.id}><td>{job.type}</td><td><StatusBadge status={job.status} /></td><td>{job.attempts}/{job.maxAttempts}</td><td><small>{formatDate(job.runAt)}</small></td><td className="error-text truncate" style={{ maxWidth: 260 }}>{job.lastError}</td><td><div className="row" style={{ justifyContent: 'flex-end' }}><Button size="xs" variant="secondary" onClick={() => retryJob(job.id)} disabled={busy || job.status === 'running'}>Retry</Button><Button size="xs" variant="danger" onClick={() => cancelJob(job.id)} disabled={busy || ['completed', 'failed'].includes(job.status)}>Cancel</Button></div></td></tr>)}</tbody></table></div>
               </Card>}
               {tab === 'integrations' && data?.providerStatus && <Card title="Integrations & environment" icon={Cpu}>
-                <KeyValue items={[['AI', data.providerStatus.ai.active], ['Research', data.providerStatus.research.active], ['Images', data.providerStatus.images.active], ['TTS', data.providerStatus.tts.active], ['Renderer', data.providerStatus.videoRenderer], ['Public base URL', data.providerStatus.publicBaseUrl]]} />
+                <KeyValue items={[['AI', data.providerStatus.ai.active], ['Research', data.providerStatus.research.active], ['Images', data.providerStatus.images.active], ['TTS', data.providerStatus.tts.active], ['Film video provider', `${data.providerStatus.film?.active || 'none'} (${data.providerStatus.film?.configured ? 'configured' : 'needs keys'})`], ['Film clip limit', `${data.providerStatus.film?.maxSceneSeconds || '—'}s / ${data.providerStatus.film?.maxScenes || '—'} scenes`], ['Renderer', data.providerStatus.videoRenderer], ['Public base URL', data.providerStatus.publicBaseUrl]]} />
                 <div className="grid grid-2" style={{ marginTop: 16 }}>
                   <div><h3>Official integration readiness</h3><div className="list">{Object.entries(data.providerStatus.integrations).map(([key, integration]) => <div className="integration-row" key={key}><strong>{integration.label}</strong><StatusBadge status={integration.configured ? 'connected' : 'needs_review'} label={integration.configured ? 'Configured' : 'Needs keys'} /></div>)}</div></div>
                   <div><h3>Required environment variables</h3><ul className="env-list">{Object.entries(data.requiredEnvironment || {}).map(([key, values]) => <li key={key}><strong>{key}</strong><br />{values.map((value) => <code key={value}>{value}</code>)}</li>)}</ul></div>
@@ -193,6 +235,56 @@ export default function Admin() {
                   <InfoBanner icon={ShieldCheck}><strong>These are provider-console steps.</strong><span> No code can grant Advanced Access, approve an OAuth consent screen, activate a paid API tier, or verify a business. The checks above remain explicitly external until you finish them.</span></InfoBanner>
                 </Card>
               </>}
+              {tab === 'activation' && data?.modules && <Card title="Activation modules" icon={Rocket} subtitle={`${data.summary.ready} ready locally · ${audit ? `${audit.summary.complete}/${audit.summary.total} fully complete` : 'loading completion audit…'} · ${data.summary.external} external. Work in dependency order.`} action={<Button size="sm" variant="ghost" onClick={() => { reload(); auditLoad.reload({ silent: true }).catch(() => {}); }}><RefreshCw size={14} /> Refresh</Button>}>
+                <InfoBanner icon={KeyRound}><strong>Local config vs. live check vs. done.</strong><span> Local config is an offline preflight. "Verify" makes a read-only, app-level call to the configured provider — it never prints or stores a secret and skips modules with no credentials. A module is <strong>complete</strong> only when its local config, verification, real application evidence and provider-console steps all pass. Use <code>npm run setup -- --work &lt;id&gt; --record</code> to work a module one by one, and <code>--confirm &lt;id&gt; --note "..."</code> only after genuinely finishing its external steps.</span></InfoBanner>
+                {audit && <div className="grid grid-2" style={{ marginBottom: 14 }}>
+                  <div><h3>Completion audit</h3><KeyValue items={[['Fully complete', `${audit.summary.complete} / ${audit.summary.total}`], ['In progress', audit.summary.inProgress], ['Not started', audit.summary.notStarted], ['Criteria met', `${audit.summary.criteriaMet} / ${audit.summary.criteriaTotal}`]]} /></div>
+                  <div><h3>Recommended next module</h3>{(audit.recommendedNextModule || audit.nextModule) ? <><strong>#{(audit.recommendedNextModule || audit.nextModule).number} {(audit.recommendedNextModule || audit.nextModule).name}</strong><p className="tiny">{(audit.recommendedNextModule || audit.nextModule).nextAction || 'Review the remaining criteria below.'}</p><p className="tiny">Ordered by dependency: security key → HTTPS origin → database → offline providers → notifications → publishing → app review. Full detail in <code>docs/ACTIVATION_PROGRESS.md</code>.</p><Button size="xs" variant="secondary" onClick={() => verifyActivation((audit.recommendedNextModule || audit.nextModule).id)} disabled={verifying === (audit.recommendedNextModule || audit.nextModule).id}>Verify now</Button></> : <p className="tiny">Every module is complete. Keep an eye on provider approvals and token expiry.</p>}</div>
+                </div>}
+                <div className="table-wrap"><table><thead><tr><th>#</th><th>Module</th><th>Local config</th><th>Live check</th><th>Done</th><th>Checks</th><th className="text-right">Action</th></tr></thead>
+                  <tbody>{data.modules.map((m) => {
+                    const v = verifyResults[m.id];
+                    return (<React.Fragment key={m.id}>
+                      <tr>
+                        <td>{m.number}</td>
+                        <td><strong>{m.name}</strong><br /><small>{m.summary}</small></td>
+                        <td><StatusBadge status={activationTone(m.status)} label={m.status.toUpperCase()} /></td>
+                        <td>{v ? <StatusBadge status={verifyTone(v.status)} label={v.status.toUpperCase()} /> : <small>not run</small>}</td>
+                        <td>{auditById[m.id] ? <StatusBadge status={auditById[m.id].complete ? 'completed' : 'needs_review'} label={auditById[m.id].complete ? 'COMPLETE' : `${auditById[m.id].passed}/${auditById[m.id].total}`} /> : <small>…</small>}</td>
+                        <td>{m.passed}/{m.total}</td>
+                        <td className="text-right"><Button size="xs" variant="secondary" disabled={verifying === m.id} onClick={() => verifyActivation(m.id)}>{verifying === m.id ? 'Checking…' : 'Verify'}</Button></td>
+                      </tr>
+                      <tr><td colSpan={7}>
+                        <details>
+                          <summary style={{ cursor: 'pointer' }}>Checklist — {m.envSpecs.length} env var(s), {m.consoleSteps.length} console step(s), {m.deploySteps.length} deploy step(s)</summary>
+                          <div className="stack" style={{ padding: '10px 0' }}>
+                            {m.envSpecs.length > 0 && <div><strong>Environment</strong><ul className="env-list">{m.envSpecs.map((s) => <li key={s.key}><code>{s.key}</code> {s.set ? '✓ set' : '· not set'} {s.secret ? '(secret)' : ''} — <small>{s.description}</small></li>)}</ul></div>}
+                            {m.callbacks.length > 0 && <div><strong>Exact callback URLs</strong><ul className="env-list">{m.callbacks.map((c) => <li key={c.key}>{c.label}<br /><code>{c.url}</code></li>)}</ul></div>}
+                            {m.permissions.length > 0 && <div><strong>Scopes</strong><div className="row row-wrap">{m.permissions.map((p) => <code key={p}>{p}</code>)}</div></div>}
+                            {m.consoleSteps.length > 0 && <div><strong>Provider console</strong><ol>{m.consoleSteps.map((s) => <li key={s.title}><strong>{s.title}.</strong> {s.detail}</li>)}</ol></div>}
+                            {m.deploySteps.length > 0 && <div><strong>Deployment</strong><ol>{m.deploySteps.map((s) => <li key={s.title}><strong>{s.title}.</strong> {s.detail}</li>)}</ol></div>}
+                            {m.verify.length > 0 && <div><strong>Verify it works</strong><ol>{m.verify.map((s) => <li key={s.title}><strong>{s.title}.</strong> {s.detail}</li>)}</ol></div>}
+                            {m.docs.length > 0 && <div className="row row-wrap">{m.docs.map((d) => <a key={d.url} href={d.url} target="_blank" rel="noreferrer">{d.label}</a>)}</div>}
+                            {auditById[m.id] && <div><strong>Completion criteria — {auditById[m.id].passed}/{auditById[m.id].total} met {auditById[m.id].complete ? '✓ COMPLETE' : ''}</strong>
+                              <ul className="env-list">{auditById[m.id].checks.map((c) => <li key={c.id}><StatusBadge status={c.status === 'pass' ? 'completed' : 'needs_review'} label={c.status === 'pass' ? 'DONE' : 'TODO'} /> <strong>{c.label}</strong> — <small>{c.detail}</small>{c.ownerLabel && <small style={{ display: 'block' }}>Owner: {c.ownerLabel}</small>}{c.action && <small style={{ display: 'block' }}>→ {c.action}</small>}{c.command && <small style={{ display: 'block' }}><code>{c.command}</code></small>}</li>)}</ul>
+                              {auditById[m.id].confirmation
+                                ? <Button size="xs" variant="ghost" disabled={confirming === m.id} onClick={() => confirmActivation(m.id, false)}>Undo steps-done confirmation</Button>
+                                : (m.consoleSteps.length + m.deploySteps.length > 0) && <Button size="xs" variant="secondary" disabled={confirming === m.id} onClick={() => confirmActivation(m.id, true)}>Mark steps done</Button>}
+                            </div>}
+                          </div>
+                        </details>
+                        {v && <div className="stack" style={{ padding: '8px 0' }}>
+                          <strong>Live check — {v.status.toUpperCase()}</strong>
+                          <small>{v.summary}</small>
+                          {v.checks.map((c) => <div key={c.name}><StatusBadge status={c.status === 'pass' ? 'completed' : c.status === 'fail' ? 'failed' : 'draft'} label={c.status.toUpperCase()} /> <small><strong>{c.name}</strong> — {c.detail}</small></div>)}
+                          {v.action && <small><strong>Next:</strong> {v.action}</small>}
+                        </div>}
+                      </td></tr>
+                    </React.Fragment>);
+                  })}</tbody>
+                </table></div>
+                <div className="stack" style={{ marginTop: 14 }}>{data.global.map((g) => <div key={g.id}><StatusBadge status={g.status === 'pass' ? 'completed' : g.status === 'fail' ? 'failed' : 'draft'} label={g.status.toUpperCase()} /> <small><strong>{g.label}</strong> — {g.detail}</small></div>)}</div>
+              </Card>}
               {tab === 'logs' && <Card title="Audit logs" icon={ShieldCheck}><div className="table-wrap"><table><thead><tr><th>Time</th><th>Action</th><th>Entity</th><th>User</th><th>Details</th></tr></thead><tbody>{(data?.logs || []).map((log) => <tr key={log.id}><td><small>{formatDate(log.createdAt)}</small></td><td>{log.action}</td><td>{log.entityType}<br /><small>{log.entityId}</small></td><td><small>{log.userId}</small></td><td><small className="mono">{JSON.stringify(log.details).slice(0, 120)}</small></td></tr>)}</tbody></table></div></Card>}
               {tab === 'messages' && <Card title="Website messages" icon={Mail} subtitle="Messages submitted through the public contact form." action={<Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button>}>
                 {(data?.messages || []).length === 0 ? <EmptyState icon={Mail} title="No messages yet" description="Contact form submissions will appear here and notify administrators." /> : (

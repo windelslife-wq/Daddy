@@ -7,6 +7,12 @@ import { parseBody, planSchema } from '../validation.js';
 import { providerStatus, assertProductionSecrets } from '../config.js';
 import { retryPublication, publicationView } from '../services/projects.js';
 import { buildIntegrationReadiness } from '../services/integrationReadiness.js';
+import { checkAll as buildActivationReport } from '../services/activation/preflight.js';
+import { verifyModule as verifyActivationModule } from '../services/activation/verifiers.js';
+import { getModule as getActivationModule } from '../services/activation/modules.js';
+import {
+  buildCompletionAudit, recordModuleVerification, setModuleConfirmation,
+} from '../services/activation/completion.js';
 import { accountView } from './accounts.js';
 import { sendNotification } from '../notifications.js';
 import { contactMessageView } from './contact.js';
@@ -30,6 +36,11 @@ const settingsPatchSchema = z.object({
   supportedLanguages: z.array(z.string().max(10)).max(30).optional(),
   supportedPlatforms: z.array(z.enum(['sandbox', 'facebook', 'instagram', 'youtube', 'x'])).min(1).max(5).optional(),
 }).refine((data) => Object.keys(data).length > 0, { message: 'No settings supplied.' });
+
+const activationConfirmSchema = z.object({
+  confirmed: z.boolean().default(true),
+  note: z.string().trim().max(500).optional().default(''),
+});
 
 const broadcastSchema = z.object({
   title: z.string().trim().min(2).max(220),
@@ -278,6 +289,45 @@ export function adminRouter() {
       },
       note: 'Secrets are read only from server environment variables and are never editable through the browser.',
     });
+  }));
+
+  // ---- Activation modules -------------------------------------------------
+  // Offline preflight: which of the 15 modules still need configuration.
+  // Never returns secret values; only "set/not set" plus safe fingerprints.
+  router.get('/activation', asyncHandler(async (_req, res) => {
+    res.json(buildActivationReport({ env: process.env }));
+  }));
+
+  // Live, read-only, app-level credential verification for one module.
+  // Intentionally admin-only and rate-limited by the global /api limiter.
+  router.post('/activation/:id/verify', asyncHandler(async (req, res) => {
+    const module = getActivationModule(req.params.id);
+    if (!module) throw notFound('Unknown activation module.');
+    const result = await verifyActivationModule(module.id, { env: process.env, timeoutMs: 8000 });
+    await recordModuleVerification(result);
+    await logAudit({
+      userId: req.user.id, action: 'admin.activation.verify', entityType: 'activation_module',
+      entityId: module.id, details: { status: result.status, checks: result.checks.length },
+    });
+    res.json(result);
+  }));
+
+  // Completion audit: explicit "done" criteria backed by real application state.
+  router.get('/activation/audit', asyncHandler(async (_req, res) => {
+    res.json(await buildCompletionAudit({ env: process.env }));
+  }));
+
+  // Confirm/unconfirm the provider-console steps that cannot be checked by code.
+  router.post('/activation/:id/confirm', asyncHandler(async (req, res) => {
+    const module = getActivationModule(req.params.id);
+    if (!module) throw notFound('Unknown activation module.');
+    const data = parseBody(activationConfirmSchema, req.body);
+    const confirmation = await setModuleConfirmation(module.id, req.user.id, data);
+    await logAudit({
+      userId: req.user.id, action: data.confirmed ? 'admin.activation.confirm' : 'admin.activation.unconfirm',
+      entityType: 'activation_module', entityId: module.id, details: { note: data.note },
+    });
+    res.json({ id: module.id, confirmation });
   }));
 
   router.get('/audit-logs', asyncHandler(async (req, res) => {

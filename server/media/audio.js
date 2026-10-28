@@ -43,7 +43,7 @@ async function writeBinaryResponse(url, options, outputPath, timeoutMs = 120000)
   return outputPath;
 }
 
-async function synthesizeScene({ text, language, voice, outputPath, workDir, index }) {
+export async function synthesizeScene({ text, language, voice, outputPath, workDir, index }) {
   const provider = config.media.ttsProvider;
   const preset = VOICE_PRESETS[voice] || VOICE_PRESETS.nova;
   let rawPath;

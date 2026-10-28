@@ -135,6 +135,27 @@ export const config = {
     xUpload: env('X_UPLOAD_BASE_URL', 'https://upload.twitter.com/1.1/media/upload.json'),
     stripe: baseUrl('STRIPE_API_BASE_URL', 'https://api.stripe.com/v1'),
   },
+  film: {
+    videoProvider: env('FILM_VIDEO_PROVIDER', 'none').toLowerCase(),
+    replicateToken: env('REPLICATE_API_TOKEN'),
+    replicateModel: env('FILM_REPLICATE_VIDEO_MODEL', 'kwaivgi/kling-v2.1-master'),
+    falKey: env('FAL_API_KEY'),
+    falModel: env('FILM_FAL_VIDEO_MODEL', 'fal-ai/kling-video/v2.1/master/image-to-video'),
+    veoKey: env('GOOGLE_VEO_API_KEY') || env('GEMINI_API_KEY'),
+    veoModel: env('FILM_VEO_MODEL', 'veo-3.0-generate-001'),
+    maxSceneSeconds: envInt('FILM_MAX_SCENE_SECONDS', 10),
+    maxScenes: envInt('FILM_MAX_SCENES', 120),
+    maxProjectSeconds: envInt('FILM_MAX_PROJECT_SECONDS', 3600),
+    maxReferenceImageMb: envInt('FILM_MAX_REFERENCE_IMAGE_MB', 10),
+    pollIntervalMs: envInt('FILM_POLL_INTERVAL_MS', 5000),
+    pollTimeoutMs: envInt('FILM_POLL_TIMEOUT_MS', 15 * 60 * 1000),
+    maxClipMb: envInt('FILM_MAX_CLIP_MB', 200),
+    // Credits per second of generated video (rounded up), per 1k TTS chars, per assembly.
+    creditPerVideoSecond: envInt('FILM_CREDIT_PER_VIDEO_SECOND', 10),
+    creditPerTtsThousandChars: envInt('FILM_CREDIT_PER_TTS_1K_CHARS', 2),
+    creditPerAssembly: envInt('FILM_CREDIT_PER_ASSEMBLY', 5),
+    grantByPlan: { free: 60, starter: 300, creator: 900, scale: 3000 },
+  },
   apiRateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MINUTE', 600),
   security: {
     trustProxy: envBool('TRUST_PROXY', true),
@@ -193,6 +214,15 @@ export function providerStatus() {
       available: ['mespeak', ...(config.ai.openaiKey ? ['openai'] : []), ...(config.media.elevenLabsKey ? ['elevenlabs'] : [])],
     },
     videoRenderer: 'ffmpeg',
+    film: {
+      active: config.film.videoProvider,
+      configured: config.film.videoProvider === 'replicate' ? Boolean(config.film.replicateToken)
+        : config.film.videoProvider === 'fal' ? Boolean(config.film.falKey)
+          : config.film.videoProvider === 'veo' ? Boolean(config.film.veoKey) : false,
+      available: ['none', 'replicate', 'fal', 'veo'],
+      maxSceneSeconds: config.film.maxSceneSeconds,
+      maxScenes: config.film.maxScenes,
+    },
     integrations: {
       sandbox: { configured: true, mode: 'local-http', label: 'Sandbox' },
       facebook: { configured: configured.facebook, mode: 'official-oauth', label: 'Facebook Pages' },

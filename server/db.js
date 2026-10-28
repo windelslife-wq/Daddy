@@ -328,6 +328,139 @@ export const tableDefinitions = {
     t.integer('shares').notNullable().defaultTo(0);
     t.string('created_at', 40).notNullable();
   },
+
+  // ---- AI filmmaking -----------------------------------------------------
+  film_series: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('title', 220).notNullable();
+    t.text('description').notNullable().defaultTo('');
+    t.string('genre', 60).notNullable().defaultTo('drama');
+    t.string('language', 12).notNullable().defaultTo('en');
+    t.string('style', 60).notNullable().defaultTo('cinematic');
+    t.text('story_bible').notNullable().defaultTo('{}');
+    t.string('status', 30).notNullable().defaultTo('active');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
+  film_projects: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('series_id', 48).index();
+    t.integer('season_number').notNullable().defaultTo(0);
+    t.integer('episode_number').notNullable().defaultTo(0);
+    t.string('type', 30).notNullable().defaultTo('short_drama');
+    t.string('title', 220).notNullable();
+    t.text('logline').notNullable().defaultTo('');
+    t.string('genre', 60).notNullable().defaultTo('drama');
+    t.string('language', 12).notNullable().defaultTo('en');
+    t.string('style', 60).notNullable().defaultTo('cinematic');
+    t.string('aspect_ratio', 10).notNullable().defaultTo('9:16');
+    t.string('target_platform', 40).notNullable().defaultTo('tiktok');
+    t.integer('target_duration_seconds').notNullable().defaultTo(60);
+    t.text('story_bible').notNullable().defaultTo('{}');
+    t.text('screenplay').notNullable().defaultTo('{}');
+    t.text('reference_image_path');
+    t.text('music_path');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.string('stage', 40).notNullable().defaultTo('draft');
+    t.integer('progress').notNullable().defaultTo(0);
+    t.text('detail');
+    t.integer('credits_estimated').notNullable().defaultTo(0);
+    t.integer('credits_spent').notNullable().defaultTo(0);
+    t.text('final_video_path');
+    t.text('thumbnail_path');
+    t.text('caption_path');
+    t.integer('duration_seconds').notNullable().defaultTo(0);
+    t.text('error');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.string('completed_at', 40);
+    t.index(['user_id', 'status']);
+  },
+  film_characters: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('series_id', 48).index();
+    t.string('name', 120).notNullable();
+    t.string('role', 60).notNullable().defaultTo('supporting');
+    t.text('description').notNullable().defaultTo('');
+    t.text('appearance_prompt').notNullable().defaultTo('');
+    t.string('voice_preset', 60).notNullable().defaultTo('nova');
+    t.string('voice_provider', 60);
+    t.text('reference_image_path');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.index(['user_id', 'film_id']);
+  },
+  film_scenes: (t) => {
+    t.string('id', 48).primary();
+    t.string('film_id', 48).notNullable().index();
+    t.integer('ordinal').notNullable();
+    t.string('slug', 120).notNullable().defaultTo('');
+    t.string('heading', 220).notNullable().defaultTo('');
+    t.string('location', 220).notNullable().defaultTo('');
+    t.string('time_of_day', 60).notNullable().defaultTo('');
+    t.text('description').notNullable().defaultTo('');
+    t.text('dialogue').notNullable().defaultTo('[]');
+    t.string('camera_movement', 120).notNullable().defaultTo('');
+    t.text('visual_prompt').notNullable().defaultTo('');
+    t.integer('duration_seconds').notNullable().defaultTo(6);
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.string('stage', 40).notNullable().defaultTo('draft');
+    t.integer('progress').notNullable().defaultTo(0);
+    t.text('detail');
+    t.text('clip_path');
+    t.text('poster_path');
+    t.text('voice_path');
+    t.string('provider', 60);
+    t.string('provider_job_id', 200);
+    t.text('provider_handle');
+    t.integer('credits_cost').notNullable().defaultTo(0);
+    t.integer('attempts').notNullable().defaultTo(0);
+    t.text('error');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.unique(['film_id', 'ordinal']);
+  },
+  film_episodes: (t) => {
+    t.string('id', 48).primary();
+    t.string('series_id', 48).notNullable().index();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.integer('season_number').notNullable().defaultTo(1);
+    t.integer('episode_number').notNullable();
+    t.string('title', 220).notNullable();
+    t.text('synopsis').notNullable().defaultTo('');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.text('continuity_notes').notNullable().defaultTo('');
+    t.string('thumbnail_path');
+    t.text('credits').notNullable().defaultTo('[]');
+    t.string('published_at', 40);
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.unique(['series_id', 'season_number', 'episode_number']);
+  },
+  credit_accounts: (t) => {
+    t.string('user_id', 48).primary();
+    t.integer('balance').notNullable().defaultTo(0);
+    t.string('updated_at', 40).notNullable();
+  },
+  credit_ledger: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.integer('amount').notNullable();
+    t.string('reason', 60).notNullable();
+    t.string('reference_type', 60);
+    t.string('reference_id', 120);
+    t.string('idempotency_key', 200).notNullable().unique();
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+  },
 };
 
 export const defaultPlans = [
@@ -362,6 +495,20 @@ export async function initializeDatabase(database, options = {}) {
     if (!await database.schema.hasTable(name)) {
       await database.schema.createTable(name, definition);
       log.info({ table: name }, 'Created database table');
+    }
+  }
+  // The filmmaking tables are new; keep partial/early installs upgradeable.
+  const filmColumns = {
+    film_projects: { progress: (t) => t.integer('progress').notNullable().defaultTo(0), detail: (t) => t.text('detail'), reference_image_path: (t) => t.text('reference_image_path'), music_path: (t) => t.text('music_path') },
+    film_scenes: { progress: (t) => t.integer('progress').notNullable().defaultTo(0), detail: (t) => t.text('detail'), provider_handle: (t) => t.text('provider_handle') },
+  };
+  for (const [table, columns] of Object.entries(filmColumns)) {
+    if (!await database.schema.hasTable(table)) continue;
+    for (const [column, define] of Object.entries(columns)) {
+      if (!await database.schema.hasColumn(table, column)) {
+        await database.schema.alterTable(table, (t) => define(t));
+        log.info({ table, column }, 'Added film column');
+      }
     }
   }
   for (const plan of defaultPlans) {

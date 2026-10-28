@@ -28,6 +28,8 @@ import Automation from './pages/Automation.jsx';
 import Settings from './pages/Settings.jsx';
 import Billing from './pages/Billing.jsx';
 import Admin from './pages/Admin.jsx';
+import FilmStudio from './pages/film/FilmStudio.jsx';
+import FilmWorkspace from './pages/film/FilmWorkspace.jsx';
 import SandboxConsent from './pages/SandboxConsent.jsx';
 import SandboxPost from './pages/SandboxPost.jsx';
 import NotFound from './pages/NotFound.jsx';
@@ -90,6 +92,20 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="billing" element={<Billing />} />
           <Route path="admin" element={<Admin />} />
+          <Route path="films" element={<FilmStudio view="hub" />} />
+          <Route path="films/short" element={<FilmStudio view="short" />} />
+          <Route path="films/long" element={<FilmStudio view="long" />} />
+          <Route path="films/series" element={<FilmStudio view="series" />} />
+          <Route path="films/scripts" element={<FilmStudio view="scripts" />} />
+          <Route path="films/characters" element={<FilmStudio view="characters" />} />
+          <Route path="films/scenes" element={<FilmStudio view="scenes" />} />
+          <Route path="films/audio" element={<FilmStudio view="audio" />} />
+          <Route path="films/editor" element={<FilmStudio view="editor" />} />
+          <Route path="films/projects" element={<FilmStudio view="projects" />} />
+          <Route path="films/media" element={<FilmStudio view="media" />} />
+          <Route path="films/published" element={<FilmStudio view="published" />} />
+          <Route path="films/credits" element={<FilmStudio view="credits" />} />
+          <Route path="films/project/:id" element={<FilmWorkspace />} />
         </Route>
         <Route element={<PublicLayout />}>
           <Route path="/" element={<Home />} />
