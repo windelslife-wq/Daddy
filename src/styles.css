@@ -1285,3 +1285,28 @@ body.nav-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
+
+/* Shared refinements for the website and account experience */
+:where(a, button, summary, input, select, textarea):focus-visible {
+  outline: 2px solid var(--primary-2);
+  outline-offset: 3px;
+}
+.marketing-card, .sitemap-card, .number-panel { transition: border-color .2s ease, box-shadow .2s ease; }
+.feature-link:hover .marketing-card { border-color: rgba(var(--primary-rgb), .5); box-shadow: var(--shadow-soft); }
+.auth-card { padding: 32px; border: 1px solid var(--border-soft); border-radius: 20px; background: var(--card-top); box-shadow: var(--shadow-soft); }
+.auth-card-head { text-align: left; }
+.auth-card-head .eyebrow { justify-content: flex-start; }
+.auth-form .input { min-height: 46px; }
+.auth-tabs a:focus-visible { position: relative; z-index: 1; }
+@media (max-width: 900px) {
+  .auth-panel { order: -1; padding: 36px 20px 42px; }
+  .auth-aside { padding: 36px 28px; }
+  .auth-aside h1 { font-size: clamp(30px, 5vw, 42px); }
+  .auth-highlight-grid { margin: 22px 0; }
+}
+@media (max-width: 720px) {
+  .auth-card { padding: 24px 18px; }
+  .auth-aside { padding: 32px 20px; }
+  .auth-highlight-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .auth-highlight-grid > div { padding: 12px; }
+}

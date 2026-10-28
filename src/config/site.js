@@ -11,6 +11,7 @@ export const SITE = {
 // footer links, document titles, and route smoke tests are generated from this.
 export const PUBLIC_PAGES = [
   { path: '/', label: 'Home', title: 'AI faceless video studio', description: 'Create and publish AI-assisted faceless videos from one workspace.', group: 'product', icon: 'home', menu: false },
+  { path: '/filmmaking', label: 'AI Filmmaking', title: 'AI filmmaking studio', description: 'Create short dramas, films, and series with a scene-by-scene production workspace.', group: 'product', icon: 'clapperboard', eyebrow: 'Film studio' },
   { path: '/features', label: 'Features', title: 'Platform features', description: 'AI scripts, original visuals, narration, captions, rendering, publishing, and analytics.', group: 'product', icon: 'sparkles', eyebrow: 'Platform' },
   { path: '/solutions', label: 'Solutions', title: 'Solutions for creators and teams', description: 'Workflows for creators, agencies, educators, publishers, and businesses.', group: 'product', icon: 'layers', eyebrow: 'Who it is for' },
   { path: '/pricing', label: 'Pricing', title: 'Plans and pricing', description: 'Transparent usage-based plans with server-enforced limits.', group: 'product', icon: 'credit-card', eyebrow: 'Plans' },
@@ -50,7 +51,7 @@ export const FOOTER_GROUPS = NAV_GROUPS.map((group) => ({
   links: group.links.filter((page) => page.path !== '/'),
 }));
 
-export const PRIMARY_NAV = ['/features', '/solutions', '/pricing', '/docs'].map((path) => PUBLIC_PAGES.find((page) => page.path === path));
+export const PRIMARY_NAV = ['/features', '/filmmaking', '/solutions', '/pricing', '/docs'].map((path) => PUBLIC_PAGES.find((page) => page.path === path));
 
 export const APP_PAGES = [
   { path: '/app', label: 'Dashboard', icon: 'layout-dashboard' },

@@ -10,7 +10,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import sharp from 'sharp';
 import chromium, { inflate, setupLambdaEnvironment } from '@sparticuz/chromium';
 import { chromium as playwrightChromium } from 'playwright-core';
-import { PUBLIC_PAGES } from '../src/config/site.js';
+import { FILM_PAGES, PUBLIC_PAGES } from '../src/config/site.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const artifactDir = path.join(root, 'test-artifacts');
@@ -157,7 +157,8 @@ test('professional global website, themes, authentication, workspace, and respon
     }
     assert.equal(await page.getByRole('menuitemradio').count(), 0);
     assert.equal(await page.locator('.theme-option').count(), 0);
-    await page.locator('.desktop-nav .nav-dropdown > summary').click();
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.desktop-nav .nav-dropdown').evaluate((element) => element.open), false);
 
     const footerText = await page.locator('.site-footer').innerText();
     for (const item of PUBLIC_PAGES.filter((item) => item.path !== '/')) {
@@ -178,9 +179,10 @@ test('professional global website, themes, authentication, workspace, and respon
     await assertNoHorizontalOverflow('contact desktop');
   });
 
-  await t.test('every public page and auth page works in Daylight and Aurora themes', async () => {
+  await t.test('every public page and auth page works in Midnight, Daylight and Aurora themes', async () => {
     const routes = [...PUBLIC_PAGES.map((item) => item.path), '/login', '/signup'];
     const themes = [
+      { label: 'Midnight', value: 'midnight' },
       { label: 'Daylight', value: 'daylight' },
       { label: 'Aurora', value: 'aurora' },
     ];
@@ -204,6 +206,22 @@ test('professional global website, themes, authentication, workspace, and respon
     }
     await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
     await setTheme('Midnight');
+  });
+
+  await t.test('sitemap includes every filmmaking tool and authentication preserves the requested destination', async () => {
+    await page.goto(`${base}/sitemap`, { waitUntil: 'networkidle' });
+    for (const item of FILM_PAGES) assert.equal(await page.locator(`.sitemap-app-grid a[href="${item.path}"]`).count(), 1, `Missing ${item.path}`);
+    await page.goto(`${base}/app/films?view=all`, { waitUntil: 'networkidle' });
+    await page.waitForURL('**/login');
+    await page.locator('.auth-tabs').getByRole('link', { name: /Create account/i }).click();
+    assert.equal(new URL(page.url()).searchParams.get('next'), '/app/films?view=all');
+    await page.locator('.auth-tabs').getByRole('link', { name: /Sign in/i }).click();
+    assert.equal(new URL(page.url()).searchParams.get('next'), '/app/films?view=all');
+    await page.setViewportSize({ width: 390, height: 844 });
+    const formPosition = await page.locator('.auth-form').boundingBox();
+    assert.ok(formPosition.y < 550, `Mobile form starts too far down: ${formPosition.y}`);
+    await assertNoHorizontalOverflow('mobile auth');
+    await page.setViewportSize({ width: 1440, height: 900 });
   });
 
   await t.test('signup creates a real account and reaches the workspace', async () => {

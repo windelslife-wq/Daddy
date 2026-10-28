@@ -60,14 +60,14 @@ The root URL is a complete public product website, not a login redirect. Every p
 
 | Area | Pages |
 |---|---|
-| Product | Home, Features, Solutions, Pricing, Integrations |
+| Product | Home, Features, AI Filmmaking, Solutions, Pricing, Integrations |
 | Resources | Documentation, Help Center, Service Status, Security, Changelog, Sitemap |
 | Company | About, Contact, Careers, Press |
 | Legal & trust | Privacy, Terms, Cookies, Acceptable Use, Data Processing |
 | Account access | Dedicated `/login` and `/signup` pages |
 | Workspace | All existing `/app/*` application pages |
 
-`src/config/site.js` is the single source of truth for page metadata, header menus, the mobile menu, footer link generation, the sitemap, document titles, and route smoke tests. `src/context/ThemeContext.jsx` provides **System**, **Midnight**, **Daylight**, and **Aurora** themes. The chosen appearance is stored in local storage and applies consistently to marketing pages, authentication pages, application pages, and the footer. A theme switcher is available in the public header and footer, auth header and footer, and app topbar, sidebar, and profile menu.
+`src/config/site.js` is the single source of truth for page metadata, header menus, the mobile menu, footer link generation, the sitemap, document titles, and route smoke tests. The sitemap also lists the authenticated filmmaking tools. `src/context/ThemeContext.jsx` provides **System**, **Midnight**, **Daylight**, and **Aurora** themes. The chosen appearance is stored in local storage and applies consistently to marketing pages, authentication pages, application pages, and the footer. A theme switcher is available in the public header and footer, auth header and footer, and app topbar, sidebar, and profile menu.
 
 The public contact form is functional, not decorative. `POST /api/contact` validates and rate-limits submissions, applies a honeypot, stores messages in the `contact_messages` table, writes an audit event, and notifies active administrators. Administrators can review, mark reviewed, archive, or reply from **Admin → Messages**.
 

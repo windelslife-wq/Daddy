@@ -14,12 +14,13 @@ export function AuthProvider({ children }) {
   const [options, setOptions] = useState(null);
   const [error, setError] = useState(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ requireSession = false } = {}) => {
     const [auth, meta] = await Promise.all([
-      get('/api/auth/session').catch(() => ({ authenticated: false, user: null })),
+      get('/api/auth/session').catch((err) => { if (requireSession) throw err; return { authenticated: false, user: null }; }),
       get('/api/meta/options').catch(() => null),
     ]);
     setSession(auth);
+    if (requireSession && !auth?.authenticated) throw new Error('Your session could not be established. Please enable cookies and try signing in again.');
     if (meta) setOptions(meta);
     else if (auth?.providerStatus) setOptions({ providerStatus: auth.providerStatus, platforms: {}, niches: [], styles: [], languages: [], voices: [], aspects: [], tones: [] });
     setError(null);
@@ -38,13 +39,13 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password) => {
     const result = await post('/api/auth/login', { email, password });
-    await refresh();
+    await refresh({ requireSession: true });
     return result;
   }, [refresh]);
 
   const register = useCallback(async (name, email, password) => {
     const result = await post('/api/auth/register', { name, email, password });
-    await refresh();
+    await refresh({ requireSession: true });
     return result;
   }, [refresh]);
 
