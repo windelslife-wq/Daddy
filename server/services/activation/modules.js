@@ -420,16 +420,19 @@ export const ACTIVATION_MODULES = [
     kind: 'hybrid',
     summary: 'Knex already supports PostgreSQL via DATABASE_URL, including schema creation, seeding, and conditional job claims verified with two real worker processes (pg-mem tests). Needs a real instance for multi-process production.',
     env: [
-      E('DATABASE_URL', 'postgresUrl', { label: 'PostgreSQL connection URL', description: 'postgresql://user:password@host:5432/faceless_studio — include the database name.' }),
+      E('DATABASE_URL', 'postgresUrl', { label: 'PostgreSQL connection URL', description: 'postgresql://user:password@host:5432/faceless_studio?sslmode=require — include the database name.' }),
     ],
     deploySteps: [
-      step('Provision PostgreSQL', 'Use a managed instance with TLS. Create an empty database; the app creates and migrates tables on startup.'),
-      step('Use a least-privilege role', 'Grant only the application schema privileges needed by the app user.'),
-      step('Enable TLS', 'Append ?sslmode=require if your provider needs it, and confirm the driver accepts the certificate chain.'),
+      step('Create the database', 'Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example faceless_studio); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.'),
+      step('Copy the direct connection URL', 'Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/faceless_studio?sslmode=require'),
+      step('Store it as a secret', 'Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.'),
+      step('Prove the connection and schema', 'With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.'),
+      step('Use a least-privilege role', 'Grant only the schema privileges the app needs and keep superuser out of the runtime role.'),
       step('Run multiple workers', 'Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.'),
       step('Back up before migrating', 'SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.'),
     ],
     verify: [
+      step('Run the bootstrap proof', 'DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution.'),
       step('Start two workers', 'Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).'),
       step('Check doctor', 'npm run doctor should report "Production database" as PASS.'),
     ],

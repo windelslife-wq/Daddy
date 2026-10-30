@@ -793,20 +793,23 @@ Knex already supports PostgreSQL via DATABASE_URL, including schema creation, se
 
 | Variable | Secret | Required when | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | no | Always | postgresql://user:password@host:5432/faceless_studio — include the database name. |
+| `DATABASE_URL` | no | Always | postgresql://user:password@host:5432/faceless_studio?sslmode=require — include the database name. |
 
 ### Deployment steps
 
-1. **Provision PostgreSQL.** Use a managed instance with TLS. Create an empty database; the app creates and migrates tables on startup.
-2. **Use a least-privilege role.** Grant only the application schema privileges needed by the app user.
-3. **Enable TLS.** Append ?sslmode=require if your provider needs it, and confirm the driver accepts the certificate chain.
-4. **Run multiple workers.** Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.
-5. **Back up before migrating.** SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.
+1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example faceless_studio); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
+2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/faceless_studio?sslmode=require
+3. **Store it as a secret.** Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.
+4. **Prove the connection and schema.** With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.
+5. **Use a least-privilege role.** Grant only the schema privileges the app needs and keep superuser out of the runtime role.
+6. **Run multiple workers.** Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.
+7. **Back up before migrating.** SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.
 
 ### Verify it works
 
-1. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
-2. **Check doctor.** npm run doctor should report "Production database" as PASS.
+1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution.
+2. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
+3. **Check doctor.** npm run doctor should report "Production database" as PASS.
 
 ### Official documentation
 
