@@ -432,7 +432,7 @@ export const ACTIVATION_MODULES = [
       step('Back up before migrating', 'SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.'),
     ],
     verify: [
-      step('Run the bootstrap proof', 'DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution.'),
+      step('Run the bootstrap proof', 'DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution. Then npm run activate -- postgres --verify-only re-checks the server version, TLS and schema readiness.'),
       step('Start two workers', 'Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).'),
       step('Check doctor', 'npm run doctor should report "Production database" as PASS.'),
     ],

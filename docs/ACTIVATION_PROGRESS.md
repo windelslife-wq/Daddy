@@ -7,7 +7,7 @@ completion audit. Regenerate with:
 npm run --silent setup -- --work all --record --progress
 ```
 
-Generated: 2026-10-30T09:12:10.525Z
+Generated: 2026-10-30T09:24:24.785Z
 
 | Metric | Value |
 |---|---|
@@ -78,7 +78,7 @@ AES-256-GCM encryption for stored OAuth credentials. Development auto-generates 
 | Check | Value |
 |---|---|
 | Offline preflight | ready (1/1) |
-| Live verification | verified — 2026-10-30T09:12:10.404Z |
+| Live verification | verified — 2026-10-30T09:24:24.637Z |
 | Completion audit | 3/4 criteria |
 
 ### Completion criteria
@@ -141,7 +141,7 @@ The deployment itself. OAuth providers and Instagram require a real public HTTPS
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (2/3) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.403Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.636Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -230,7 +230,7 @@ Knex already supports PostgreSQL via DATABASE_URL, including schema creation, se
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/1) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.403Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.636Z |
 | Completion audit | 1/4 criteria |
 
 ### Completion criteria
@@ -271,7 +271,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 ### Verify it works
 
-1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution.
+1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution. Then npm run activate -- postgres --verify-only re-checks the server version, TLS and schema readiness.
 2. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
 3. **Check doctor.** npm run doctor should report "Production database" as PASS.
 
@@ -311,7 +311,7 @@ OpenAI, Anthropic, and Gemini adapters for scripts, scene plans, captions and ha
 | Check | Value |
 |---|---|
 | Offline preflight | ready (4/4) |
-| Live verification | verified — 2026-10-30T09:12:10.403Z |
+| Live verification | verified — 2026-10-30T09:24:24.635Z |
 | Completion audit | 3/4 criteria |
 
 ### Completion criteria
@@ -381,7 +381,7 @@ Optional web research that feeds sourced context into script generation. Default
 | Check | Value |
 |---|---|
 | Offline preflight | ready (1/1) |
-| Live verification | verified — 2026-10-30T09:12:10.403Z |
+| Live verification | verified — 2026-10-30T09:24:24.635Z |
 | Completion audit | 3/4 criteria |
 
 ### Completion criteria
@@ -450,7 +450,7 @@ Optional generative scene images. The default procedural SVG engine creates orig
 | Check | Value |
 |---|---|
 | Offline preflight | ready (3/3) |
-| Live verification | verified — 2026-10-30T09:12:10.403Z |
+| Live verification | verified — 2026-10-30T09:24:24.636Z |
 | Completion audit | 3/4 criteria |
 
 ### Completion criteria
@@ -519,7 +519,7 @@ Optional higher-quality narration. The default offline mespeak engine supports t
 | Check | Value |
 |---|---|
 | Offline preflight | ready (3/3) |
-| Live verification | verified — 2026-10-30T09:12:10.403Z |
+| Live verification | verified — 2026-10-30T09:24:24.636Z |
 | Completion audit | 3/4 criteria |
 
 ### Completion criteria
@@ -588,7 +588,7 @@ Nodemailer transport that mirrors in-app notifications to email. Fully implement
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (1/2) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/4 criteria |
 
 ### Completion criteria
@@ -662,7 +662,7 @@ Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt re
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/2) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/4 criteria |
 
 ### Completion criteria
@@ -736,7 +736,7 @@ Official Meta OAuth connect and video publishing to Facebook Pages. Adapters, to
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (1/5) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.634Z |
 | Completion audit | 0/6 criteria |
 
 ### Completion criteria
@@ -845,7 +845,7 @@ Reels publishing via the Meta Graph container API. Shares the Facebook OAuth app
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/5) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/7 criteria |
 
 ### Completion criteria
@@ -954,7 +954,7 @@ Resumable uploads, captions, Data API engagement, Analytics API watch time/share
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/7 criteria |
 
 ### Completion criteria
@@ -1063,7 +1063,7 @@ OAuth 1.0a user-context connect, chunked v1.1 media upload, v2 post creation, pu
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -1167,7 +1167,7 @@ Subscription checkout, signature-verified webhooks, idempotent event storage, an
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-30T09:12:10.402Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -1274,7 +1274,7 @@ The four provider-console approval workflows (Meta, Google, X, Stripe). These ca
 | Check | Value |
 |---|---|
 | Offline preflight | external (0/5) |
-| Live verification | unsupported — 2026-10-30T09:12:10.404Z |
+| Live verification | unsupported — 2026-10-30T09:24:24.637Z |
 | Completion audit | 0/3 criteria |
 
 ### Completion criteria

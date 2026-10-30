@@ -807,7 +807,7 @@ Knex already supports PostgreSQL via DATABASE_URL, including schema creation, se
 
 ### Verify it works
 
-1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution.
+1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution. Then npm run activate -- postgres --verify-only re-checks the server version, TLS and schema readiness.
 2. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
 3. **Check doctor.** npm run doctor should report "Production database" as PASS.
 
