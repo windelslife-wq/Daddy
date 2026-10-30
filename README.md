@@ -23,7 +23,7 @@ This is **not a clickable UI demo**. The local preview works end to end without 
 | Auth / security | Sessions, scrypt hashes, encrypted OAuth credentials, RBAC, quotas, same-origin checks |
 | Billing | Real server-side plan limits; Stripe checkout only when configured |
 | Frontend | Responsive React global website, public/auth/app pages, four appearance themes, generated footer links, studio, calendar, publishing, analytics, admin, settings |
-| AI filmmaking | Short drama, long drama, movie and episodic-series projects; story bibles; recurring cast; scene-by-scene real AI video jobs; per-scene regeneration; FFmpeg assembly; subtitles; credits ledger; installable PWA |
+| AI filmmaking | Short drama, long drama, movie and episodic-series projects; story bibles; recurring cast with wardrobe/voice/reference images; scene-by-scene real AI video jobs with pause/resume/cancel/retry; bounded concurrency; sound effects; segmented FFmpeg assembly; subtitles; credits ledger; installable PWA |
 
 ---
 
@@ -33,8 +33,10 @@ This is **not a clickable UI demo**. The local preview works end to end without 
 
 - **Four formats in one ecosystem:** Short Drama, Long Drama & Movie Studio, Series & Episodes, plus standalone AI Script Writer, Character Studio, Scene Generator, Voice & Audio Studio, Movie Editor, My Projects, My Media, Published Movies and Credits & Subscriptions.
 - **Workflow:** idea or reference image → format → genre/language/duration/style/platform → screenplay & dialogue → characters with visual references → real AI scene clips → voices/SFX/music/subtitles → scene arrangement & editing → preview → export/download/save/publish. Every step persists, so you can resume a saved project at any time.
-- **Long-form is scene-by-scene.** AI video models produce short clips (default 10s max, 120 scenes max). A movie is assembled from many real clips into one MP4. No request pretends to generate a feature-length film in one call.
-- **Review and regenerate only the scenes you dislike.** Failed jobs, provider errors, progress and remaining credits are always visible. Credits are estimated before expensive work, reserved before a job, and refunded automatically on failure.
+- **Long-form is scene-by-scene.** AI video models produce short clips (default 10s max). A 1–60 minute film is planned as `ceil(duration / clip length)` scenes — 360 clips for a 60-minute cut — and assembled from those real clips into one MP4. Scene count and clip length are configurable (`FILM_MAX_SCENES`, `FILM_MAX_SCENE_SECONDS`), and an over-limit request fails with exact numbers instead of being silently shortened. No request pretends to generate a feature-length film in one call.
+- **Review and regenerate only the scenes you dislike.** Failed jobs, provider errors, progress and remaining credits are always visible. Credits are estimated before expensive work, reserved before a job, and refunded automatically on failure or cancellation. A whole production run can be paused, resumed or cancelled; the canvas supports 16:9, 9:16 and 1:1.
+- **Crash-safe runs.** Generation state lives in the database, so a worker that dies mid-run resumes the same provider predictions on restart (measured 509 ms after `SIGKILL`). Credits are reserved per attempt and refunded exactly once — never twice.
+- **Verify a live provider in one command.** `npm run verify:provider -- --provider=replicate` generates, downloads and FFmpeg-probes one real clip with your key. What is and is not production-verified is recorded in **[docs/PRODUCTION-ACCEPTANCE.md](docs/PRODUCTION-ACCEPTANCE.md)**.
 - **Requires real providers for real AI video.** Set `FILM_VIDEO_PROVIDER=replicate|fal|veo` plus its server-side key. With `FILM_VIDEO_PROVIDER=none`, scene generation is disabled with a clear `503` — the platform never fabricates a clip or simulates provider progress. See **[docs/FILMMAKING.md](docs/FILMMAKING.md)** for provider setup, model overrides, generation limits, commercial-use notes, credit pricing, the full API, PWA/mobile scope and features needing paid services.
 
 Quick start:

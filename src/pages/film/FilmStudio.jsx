@@ -24,10 +24,51 @@ const TYPE_LABELS = { short_drama: 'Short drama', long_drama: 'Long drama', movi
 
 const FORMATS = [
   { id: 'short_drama', icon: Smartphone, title: 'Short Drama', body: '45–90 second vertical dramas for TikTok, Shorts, Reels and Facebook.', tag: '9:16 · 1–3 min', colour: 'primary' },
-  { id: 'long_drama', icon: FilmIcon, title: 'Long Drama', body: 'Multi-scene stories assembled scene-by-scene into one continuous film.', tag: '16:9 or 9:16 · 5–30 min', colour: 'cyan' },
-  { id: 'movie', icon: Clapperboard, title: 'Movie', body: 'Feature-length projects built from short AI clips, with cast continuity and subtitles.', tag: '16:9 · 30–60 min', colour: 'amber' },
+  { id: 'long_drama', icon: FilmIcon, title: 'Long Drama', body: 'Multi-scene stories assembled scene-by-scene into one continuous film.', tag: '16:9 or 9:16 · 5–60 min', colour: 'cyan' },
+  { id: 'movie', icon: Clapperboard, title: 'Movie', body: 'Feature-length projects built from hundreds of real AI clips, with cast continuity, sound design and subtitles.', tag: '16:9 · 30–60 min', colour: 'amber' },
   { id: 'series', icon: Layers, title: 'Episodic Series', body: 'Seasons, episodes, story bibles, recurring characters, thumbnails and credits.', tag: 'Seasons & episodes', colour: 'green' },
 ];
+
+/** Long-form duration shortcuts, in seconds. Any value between the limits works. */
+export const DURATION_PRESETS = [
+  { label: '1 min', seconds: 60 },
+  { label: '2 min', seconds: 120 },
+  { label: '5 min', seconds: 300 },
+  { label: '10 min', seconds: 600 },
+  { label: '15 min', seconds: 900 },
+  { label: '20 min', seconds: 1200 },
+  { label: '30 min', seconds: 1800 },
+  { label: '45 min', seconds: 2700 },
+  { label: '60 min', seconds: 3600 },
+];
+
+export function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  if (total < 60) return `${total}s`;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  if (!hours) return `${minutes} min`;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+/**
+ * Scene plan for a duration. Mirrors the server planner: ceil(duration / max
+ * clip length), never truncated to a hidden cap.
+ */
+export function planForDuration(limits, seconds) {
+  const perClip = Math.max(1, Number(limits?.maxSceneSeconds) || 10);
+  const duration = Math.max(1, Number(seconds) || perClip);
+  const sceneCount = Math.max(1, Math.ceil(duration / perClip));
+  const sceneSeconds = Math.max(1, Math.min(perClip, Math.ceil(duration / sceneCount)));
+  const maxScenes = Number(limits?.maxScenes) || sceneCount;
+  return { sceneCount, sceneSeconds, maxScenes, exceeds: sceneCount > maxScenes, duration };
+}
+
+export function estimateCreditsFor(limits, credits, seconds) {
+  const plan = planForDuration(limits, seconds);
+  const perSecond = Number(credits?.perVideoSecond) || 10;
+  return plan.sceneCount * plan.sceneSeconds * perSecond;
+}
 
 export function useFilmConfig() {
   return useLoad(() => get('/api/films/config'), [], { initial: null });
@@ -149,9 +190,13 @@ export function NewProjectModal({ defaultType = 'short_drama', onClose, onCreate
     aspectRatio: defaultType === 'short_drama' ? '9:16' : '16:9',
     targetPlatform: defaultType === 'short_drama' ? 'tiktok' : 'youtube',
     targetDurationSeconds: defaultType === 'short_drama' ? 60 : defaultType === 'long_drama' ? 600 : 1800,
+    sceneProvider: '',
   });
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
-  const scenePlan = config ? Math.min(config.limits.maxScenes, Math.max(1, Math.ceil(Number(form.targetDurationSeconds) / config.limits.maxSceneSeconds))) : '—';
+  const plan = planForDuration(config?.limits, form.targetDurationSeconds);
+  const scenePlan = config ? plan.sceneCount : '—';
+  const estimatedCredits = config ? estimateCreditsFor(config.limits, config.credits, form.targetDurationSeconds) + (config.credits?.perAssembly || 0) : null;
+  const configuredProviders = (config?.videoProvider?.catalog || []).filter((item) => item.configured);
 
   async function submit(event) {
     event.preventDefault();
@@ -161,6 +206,7 @@ export function NewProjectModal({ defaultType = 'short_drama', onClose, onCreate
         type: form.type, title: form.title.trim(), genre: form.genre, language: form.language,
         style: form.style, aspectRatio: form.aspectRatio, targetPlatform: form.targetPlatform,
         targetDurationSeconds: Number(form.targetDurationSeconds),
+        sceneProvider: form.sceneProvider || null,
       });
       if (form.idea.trim().length >= 3) {
         await post(`/api/films/${created.film.id}/screenplay`, {
@@ -201,14 +247,37 @@ export function NewProjectModal({ defaultType = 'short_drama', onClose, onCreate
           <Field label="Target platform"><select className="input" value={form.targetPlatform} onChange={(e) => update('targetPlatform', e.target.value)}>
             {(config?.platforms || ['tiktok']).map((item) => <option key={item} value={item}>{pretty(item)}</option>)}
           </select></Field>
-          <Field label="Target duration (seconds)" hint={`Planned as ~${scenePlan} short AI clips. Long films are never generated in one request.`}>
-            <input className="input" type="number" min="5" max={config?.limits?.maxProjectSeconds || 3600} value={form.targetDurationSeconds} onChange={(e) => update('targetDurationSeconds', e.target.value)} />
+          <Field label="Film length" className="span-2" hint={`Planned as ${scenePlan} AI clips of ~${plan.sceneSeconds}s each. Long films are always generated scene by scene.`}>
+            <div className="film-preset-row" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {DURATION_PRESETS.filter((preset) => preset.seconds <= (config?.limits?.maxProjectSeconds || 3600)).map((preset) => (
+                <button key={preset.seconds} type="button"
+                  className={`film-chip ${Number(form.targetDurationSeconds) === preset.seconds ? 'good' : ''}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => update('targetDurationSeconds', preset.seconds)}>
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+            <input className="input" type="number" min={config?.limits?.minProjectSeconds || 5} max={config?.limits?.maxProjectSeconds || 3600} value={form.targetDurationSeconds} onChange={(e) => update('targetDurationSeconds', e.target.value)} aria-label="Target duration in seconds" />
+          </Field>
+          <Field label="Video provider" hint="Only providers configured on this server can be selected.">
+            <select className="input" value={form.sceneProvider} onChange={(e) => update('sceneProvider', e.target.value)}>
+              <option value="">Server default{config?.videoProvider?.configured ? ` (${pretty(config.videoProvider.provider)})` : ''}</option>
+              {configuredProviders.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
           </Field>
           <Field label="Story idea" className="span-2" hint="Optional — you can also write the script later in the AI Script Writer.">
             <textarea className="input" rows={3} value={form.idea} onChange={(e) => update('idea', e.target.value)} placeholder="Two siblings uncover a secret in their late father's workshop…" />
           </Field>
         </div>
-        <div className="film-hint">A {form.targetDurationSeconds}s project is planned as roughly {scenePlan} scenes of up to {config?.limits?.maxSceneSeconds || 10}s each. You can review and regenerate any single scene later.</div>
+        <div className="film-breakdown" style={{ marginTop: 10 }}>
+          <div className="film-breakdown-row"><span>Planned clips</span><strong>{scenePlan}{plan.exceeds ? ' (over limit)' : ''}</strong></div>
+          <div className="film-breakdown-row"><span>Runtime</span><strong>{formatDuration(Number(form.targetDurationSeconds))}</strong></div>
+          {estimatedCredits !== null && <div className="film-breakdown-row"><span>Estimated credits</span><strong>{estimatedCredits}</strong></div>}
+          <div className="film-breakdown-row"><span>Longest film this server can produce</span><strong>{config ? formatDuration((config.limits.maxProducibleSeconds) || 0) : '—'}</strong></div>
+        </div>
+        {plan.exceeds && <InfoBanner tone="warning" icon={Info}><strong>This length needs {plan.sceneCount} scenes; the server allows {plan.maxScenes}.</strong><div className="film-provider-note">Shorten the film or raise FILM_MAX_SCENES and FILM_MAX_PROJECT_SECONDS together. The project will be rejected rather than silently shortened.</div></InfoBanner>}
+        <div className="film-hint">A {formatDuration(Number(form.targetDurationSeconds))} film is planned as {scenePlan} real AI clips of up to {config?.limits?.maxSceneSeconds || 10}s, rendered scene by scene and assembled into one MP4. Each scene can be reviewed and regenerated later.</div>
       </form>
     </Modal>
   );

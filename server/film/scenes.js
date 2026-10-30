@@ -5,6 +5,13 @@
  * opaque provider handle, and enqueues a durable job. The worker can be killed
  * at any point: on restart it resumes polling the same provider prediction,
  * and any definitive failure refunds the reservation exactly once.
+ *
+ * Long-form production:
+ *  - a project's scene plan is never truncated (see screenplay.planProject);
+ *  - "generate all" starts at most `film.sceneConcurrency` scenes at once and
+ *    leaves the rest as `planned`, dispatched as slots free up;
+ *  - a run can be paused, resumed, cancelled, and failed scenes retried;
+ *  - each scene clip is probed for a real video stream before it is accepted.
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -13,21 +20,25 @@ import { z } from 'zod';
 import { db, now, newId, json, parseJson, number, addJob, notify } from '../db.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
-import { ensureProjectDir, projectDir, ffmpeg } from '../media/utils.js';
+import { ensureProjectDir, projectDir, ffmpeg, probeVideo } from '../media/utils.js';
 import {
   FILM_TYPES, FILM_GENRES, FILM_STYLES, FILM_ASPECTS, FILM_PLATFORMS,
-  clampInt, filmLimits, planSceneCount, normaliseEditedScreenplay,
+  clampInt, filmLimits, planSceneCount, planProject, assertScenePlanFits, MAX_REQUESTABLE_SECONDS,
+  distributeDurations, normaliseEditedScreenplay,
 } from './screenplay.js';
 import {
   estimateFilm, sceneCreditCost, assemblyCreditCost,
   reserveCredits, refundCredits, getBalance,
 } from './credits.js';
 import {
-  startVideoGeneration, pollVideoGeneration, downloadProviderVideo, requireVideoProvider,
+  startVideoGeneration, pollVideoGeneration, downloadProviderVideo,
+  requireVideoProvider, resolveVideoProvider, cancelVideoGeneration, providerStatus,
 } from './videoProviders.js';
 import { invalidateAssembly, assembleFilm, assemblyPreflight } from './assembly.js';
 
-const SCENE_STATUSES = ['draft', 'queued', 'processing', 'ready', 'failed'];
+const SCENE_STATUSES = ['draft', 'planned', 'queued', 'processing', 'ready', 'failed', 'cancelled'];
+const ACTIVE_SCENE_STATUSES = ['queued', 'processing'];
+const PENDING_SCENE_STATUSES = ['draft', 'planned', 'failed', 'cancelled', 'paused'];
 
 export const createFilmSchema = z.object({
   type: z.enum(FILM_TYPES).default('short_drama'),
@@ -38,17 +49,19 @@ export const createFilmSchema = z.object({
   style: z.string().max(60).optional().default('cinematic'),
   aspectRatio: z.enum(FILM_ASPECTS).optional().default('9:16'),
   targetPlatform: z.string().max(40).optional().default('tiktok'),
-  targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional().default(60),
+  targetDurationSeconds: z.number().int().min(config.film.minProjectSeconds).max(MAX_REQUESTABLE_SECONDS).optional().default(60),
   storyBible: z.record(z.any()).optional().default({}),
   seriesId: z.string().max(48).optional().nullable(),
   seasonNumber: z.number().int().min(0).max(100).optional().default(0),
   episodeNumber: z.number().int().min(0).max(1000).optional().default(0),
   voice: z.string().max(60).optional().default('nova'),
+  sceneProvider: z.string().max(60).optional().nullable(),
 });
 
 export const patchFilmSchema = createFilmSchema.partial().omit({ type: true, seriesId: true }).extend({
   status: z.string().max(30).optional(),
   subtitles: z.boolean().optional(),
+  sceneProvider: z.string().max(60).optional().nullable(),
 });
 
 export const patchSceneSchema = z.object({
@@ -59,7 +72,13 @@ export const patchSceneSchema = z.object({
   dialogue: z.array(z.object({ character: z.string().min(1).max(120), line: z.string().min(1).max(1000), emotion: z.string().max(80).optional() })).max(20).optional(),
   camera_movement: z.string().max(120).optional(),
   visual_prompt: z.string().max(2000).optional(),
-  duration_seconds: z.number().int().min(4).max(config.film.maxSceneSeconds).optional(),
+  duration_seconds: z.number().int().min(config.film.minSceneSeconds).max(config.film.maxSceneSeconds).optional(),
+  cast: z.array(z.string().min(1).max(120)).max(20).optional(),
+  sfx: z.array(z.object({
+    assetId: z.string().min(1).max(60),
+    atSeconds: z.number().min(0).max(120).optional().default(0),
+    gain: z.number().min(0).max(2).optional().default(1),
+  })).max(8).optional(),
 });
 
 // --- views -----------------------------------------------------------------
@@ -87,6 +106,8 @@ export function filmView(row, summary = {}) {
     stage: row.stage,
     progress: number(row.progress),
     detail: row.detail || null,
+    runState: row.run_state || 'idle',
+    sceneProvider: row.scene_provider || null,
     creditsEstimated: number(row.credits_estimated),
     creditsSpent: number(row.credits_spent),
     hasVideo: Boolean(row.final_video_path),
@@ -102,6 +123,9 @@ export function filmView(row, summary = {}) {
     readyScenes: number(summary.readyScenes, 0),
     failedScenes: number(summary.failedScenes, 0),
     queuedScenes: number(summary.queuedScenes, 0),
+    plannedScenes: number(summary.plannedScenes, 0),
+    cancelledScenes: number(summary.cancelledScenes, 0),
+    etaSeconds: summary.etaSeconds ?? null,
   };
 }
 
@@ -119,6 +143,8 @@ export function sceneView(row) {
     cameraMovement: row.camera_movement,
     visualPrompt: row.visual_prompt,
     durationSeconds: number(row.duration_seconds),
+    cast: parseJson(row.cast, []),
+    sfx: parseJson(row.sfx, []),
     status: row.status,
     stage: row.stage,
     progress: number(row.progress),
@@ -129,6 +155,7 @@ export function sceneView(row) {
     providerJobId: row.provider_job_id || null,
     creditsCost: number(row.credits_cost),
     attempts: number(row.attempts),
+    cancelRequested: number(row.cancel_requested) === 1,
     error: row.error || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -158,21 +185,46 @@ export async function ownedFilm(userId, filmId, role = 'user') {
 async function sceneSummary(filmIds) {
   if (!filmIds.length) return new Map();
   const rows = await db('film_scenes').whereIn('film_id', filmIds).select('film_id', 'status');
-  const map = new Map(filmIds.map((id) => [id, { sceneCount: 0, readyScenes: 0, failedScenes: 0, queuedScenes: 0 }]));
+  const map = new Map(filmIds.map((id) => [id, {
+    sceneCount: 0, readyScenes: 0, failedScenes: 0, queuedScenes: 0, plannedScenes: 0, cancelledScenes: 0,
+  }]));
   for (const row of rows) {
     const item = map.get(row.film_id);
     if (!item) continue;
     item.sceneCount += 1;
     if (row.status === 'ready') item.readyScenes += 1;
     else if (row.status === 'failed') item.failedScenes += 1;
+    else if (row.status === 'cancelled') item.cancelledScenes += 1;
+    else if (row.status === 'planned') item.plannedScenes += 1;
     else if (row.status === 'queued' || row.status === 'processing') item.queuedScenes += 1;
   }
   return map;
 }
 
+function assertSceneQuota(count) {
+  if (count > config.film.maxScenes) {
+    throw new AppError(400, 'too_many_scenes',
+      `A project cannot have more than ${config.film.maxScenes} scenes. Raise FILM_MAX_SCENES and FILM_MAX_PROJECT_SECONDS together to support a longer film.`,
+      { count, maxScenes: config.film.maxScenes });
+  }
+}
+
+/** Scene provider for a project: explicit override, else the server default. */
+export function filmSceneProvider(film) {
+  return film?.scene_provider || config.film.videoProvider;
+}
+
+/** Validate that a requested provider is real and configured (no fallback). */
+export function validateSceneProvider(value) {
+  if (value === null || value === undefined || value === '') return null;
+  return resolveVideoProvider(String(value));
+}
+
 // --- project CRUD ----------------------------------------------------------
 export async function createFilm(userId, input) {
   const data = createFilmSchema.parse(input);
+  const plan = assertScenePlanFits(data.targetDurationSeconds);
+  const sceneProvider = validateSceneProvider(data.sceneProvider);
   const id = newId('flm_');
   const timestamp = now();
   await db('film_projects').insert({
@@ -187,10 +239,13 @@ export async function createFilm(userId, input) {
     story_bible: json(data.storyBible), screenplay: json({}),
     status: 'draft', stage: 'draft', progress: 0,
     metadata: json({ voice: data.voice, subtitles: true }),
+    run_state: 'idle', scene_provider: sceneProvider,
+    credits_estimated: estimateFilm([], { assembly: false }).total,
     created_at: timestamp, updated_at: timestamp,
   });
   await ensureProjectDir(`film_${id}`);
-  return filmView(await db('film_projects').where({ id }).first());
+  const row = await db('film_projects').where({ id }).first();
+  return { ...filmView(row), plan };
 }
 
 export async function listFilms(userId, { type, seriesId, status, limit = 50, offset = 0 } = {}) {
@@ -215,6 +270,8 @@ export async function updateFilm(userId, filmId, patch, role = 'user') {
   for (const [key, column] of Object.entries(map)) {
     if (data[key] !== undefined) updates[column] = data[key];
   }
+  if (data.targetDurationSeconds !== undefined) assertScenePlanFits(data.targetDurationSeconds);
+  if (data.sceneProvider !== undefined) updates.scene_provider = validateSceneProvider(data.sceneProvider);
   if (data.storyBible) updates.story_bible = json(data.storyBible);
   if (data.voice !== undefined || data.subtitles !== undefined) {
     updates.metadata = json({ ...parseJson(film.metadata, {}), ...(data.voice !== undefined ? { voice: data.voice } : {}), ...(data.subtitles !== undefined ? { subtitles: data.subtitles } : {}) });
@@ -224,7 +281,9 @@ export async function updateFilm(userId, filmId, patch, role = 'user') {
 }
 
 export async function deleteFilm(userId, filmId, role = 'user') {
-  await ownedFilm(userId, filmId, role);
+  const film = await ownedFilm(userId, filmId, role);
+  const jobs = await db('jobs').where({ type: 'film_generate_scene' }).where('payload', 'like', `%${filmId}%`).select('id');
+  await db('jobs').whereIn('id', jobs.map((job) => job.id)).update({ status: 'cancelled', completed_at: now(), locked_at: null, updated_at: now() }).catch(() => {});
   await db.transaction(async (trx) => {
     await trx('film_scenes').where({ film_id: filmId }).del();
     await trx('film_characters').where({ film_id: filmId }).del();
@@ -237,33 +296,48 @@ export async function deleteFilm(userId, filmId, role = 'user') {
 }
 
 // --- screenplay / scenes ---------------------------------------------------
+function castFromScene(scene) {
+  const names = new Set(
+    (Array.isArray(scene.cast) ? scene.cast : [])
+      .map((name) => String(name || '').trim())
+      .filter(Boolean),
+  );
+  for (const line of Array.isArray(scene.dialogue) ? scene.dialogue : []) {
+    if (line?.character) names.add(String(line.character).trim());
+  }
+  return [...names];
+}
+
 export async function saveScreenplay(userId, filmId, screenplay, role = 'user') {
   const film = await ownedFilm(userId, filmId, role);
   const clean = normaliseEditedScreenplay(screenplay);
-  if (clean.scenes.length > config.film.maxScenes) throw new AppError(400, 'too_many_scenes', `A project cannot have more than ${config.film.maxScenes} scenes.`);
+  assertSceneQuota(clean.scenes.length);
+  // Match the requested runtime instead of defaulting every clip to the maximum.
+  const timed = distributeDurations(clean.scenes, film.target_duration_seconds || clean.estimatedSeconds);
   const timestamp = now();
   await db.transaction(async (trx) => {
     await trx('film_scenes').where({ film_id: filmId }).del();
-    for (const scene of clean.scenes) {
+    for (const scene of timed) {
       await trx('film_scenes').insert({
         id: newId('scn_'), film_id: filmId, ordinal: scene.ordinal,
         heading: scene.heading, location: scene.location, time_of_day: scene.time_of_day,
         description: scene.description, dialogue: json(scene.dialogue),
         camera_movement: scene.camera_movement, visual_prompt: scene.visual_prompt,
         duration_seconds: scene.duration_seconds,
+        cast: json(castFromScene(scene)),
         status: 'draft', stage: 'draft', progress: 0,
         created_at: timestamp, updated_at: timestamp,
       });
     }
-    const estimate = estimateFilm(clean.scenes);
+    const estimate = estimateFilm(timed);
     // Never silently replace the user's own title. The generated title is
     // surfaced in the UI as a suggestion the creator can explicitly apply.
     await trx('film_projects').where({ id: filmId }).update({
       logline: film.logline || clean.logline,
       story_bible: json(clean.story_bible),
-      screenplay: json(clean),
+      screenplay: json({ ...clean, scenes: timed }),
       credits_estimated: estimate.total,
-      stage: 'screenplay', progress: 0, error: null, updated_at: timestamp,
+      stage: 'screenplay', progress: 0, error: null, run_state: 'idle', updated_at: timestamp,
     });
   });
   await invalidateAssembly(filmId);
@@ -306,6 +380,14 @@ export async function updateScene(userId, filmId, sceneId, patch, role = 'user')
     if (data[key] !== undefined) updates[key] = data[key];
   }
   if (data.dialogue) updates.dialogue = json(data.dialogue);
+  if (data.cast) updates.cast = json(data.cast);
+  if (data.sfx) {
+    const assets = await sfxAssetList(filmId);
+    const known = new Set(assets.map((asset) => asset.id));
+    const unknown = data.sfx.filter((cue) => !known.has(cue.assetId));
+    if (unknown.length) throw new AppError(400, 'sfx_asset_unknown', 'Attach sound effects that were uploaded to this project first.');
+    updates.sfx = json(data.sfx);
+  }
   await db('film_scenes').where({ id: sceneId }).update(updates);
   const fresh = await db('film_scenes').where({ id: sceneId }).first();
   const stored = parseJson((await db('film_projects').where({ id: filmId }).first())?.screenplay, {});
@@ -324,13 +406,14 @@ function sceneViewToScreenplayScene(row) {
     description: row.description, dialogue: parseJson(row.dialogue, []),
     camera_movement: row.camera_movement, visual_prompt: row.visual_prompt,
     duration_seconds: number(row.duration_seconds),
+    cast: parseJson(row.cast, []),
   };
 }
 
 export async function addScene(userId, filmId, payload = {}, role = 'user') {
   const film = await ownedFilm(userId, filmId, role);
   const count = number((await db('film_scenes').where({ film_id: filmId }).count('* as count').first())?.count);
-  if (count >= config.film.maxScenes) throw new AppError(400, 'too_many_scenes', `A project cannot have more than ${config.film.maxScenes} scenes.`);
+  assertSceneQuota(count + 1);
   const data = patchSceneSchema.parse(payload);
   const id = newId('scn_');
   await db('film_scenes').insert({
@@ -339,7 +422,9 @@ export async function addScene(userId, filmId, payload = {}, role = 'user') {
     time_of_day: data.time_of_day || '', description: data.description || '',
     dialogue: json(data.dialogue || []), camera_movement: data.camera_movement || '',
     visual_prompt: data.visual_prompt || '', duration_seconds: data.duration_seconds || config.film.maxSceneSeconds,
-    status: 'draft', stage: 'draft', progress: 0, created_at: now(), updated_at: now(),
+    cast: json(castFromScene(data)), sfx: json([]),
+    status: 'draft', stage: 'draft', progress: 0,
+    created_at: now(), updated_at: now(),
   });
   await invalidateAssembly(filmId);
   return sceneView(await db('film_scenes').where({ id }).first());
@@ -380,6 +465,50 @@ async function reindexScenes(trx, filmId) {
   const rows = await trx('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc').select('id');
   await trx('film_scenes').where({ film_id: filmId }).update({ ordinal: db.raw('ordinal + ?', [100000]) });
   for (let i = 0; i < rows.length; i += 1) await trx('film_scenes').where({ id: rows[i].id }).update({ ordinal: i + 1 });
+}
+
+// --- sound effects ---------------------------------------------------------
+export async function sfxAssetList(filmId) {
+  const film = await db('film_projects').where({ id: filmId }).first();
+  const metadata = parseJson(film?.metadata, {});
+  return Array.isArray(metadata.sfxAssets) ? metadata.sfxAssets.filter((asset) => asset?.path && fs.existsSync(asset.path)) : [];
+}
+
+export async function addSfxAsset(userId, filmId, asset, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  const metadata = parseJson(film.metadata, {});
+  const list = Array.isArray(metadata.sfxAssets) ? metadata.sfxAssets : [];
+  const record = {
+    id: `sfx_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    name: String(asset.name || 'Sound effect').slice(0, 120),
+    path: asset.path,
+    durationSeconds: Number(asset.durationSeconds) || 0,
+    bytes: Number(asset.bytes) || 0,
+    createdAt: now(),
+  };
+  await db('film_projects').where({ id: filmId }).update({
+    metadata: json({ ...metadata, sfxAssets: [...list, record].slice(-100) }), updated_at: now(),
+  });
+  return record;
+}
+
+export async function deleteSfxAsset(userId, filmId, assetId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  const metadata = parseJson(film.metadata, {});
+  const list = Array.isArray(metadata.sfxAssets) ? metadata.sfxAssets : [];
+  const asset = list.find((item) => item.id === assetId);
+  if (!asset) throw new AppError(404, 'sfx_asset_not_found', 'Sound effect not found.');
+  await db('film_projects').where({ id: filmId }).update({
+    metadata: json({ ...metadata, sfxAssets: list.filter((item) => item.id !== assetId) }), updated_at: now(),
+  });
+  const scenes = await db('film_scenes').where({ film_id: filmId });
+  for (const scene of scenes) {
+    const cues = parseJson(scene.sfx, []).filter((cue) => cue.assetId !== assetId);
+    if (cues.length !== parseJson(scene.sfx, []).length) await db('film_scenes').where({ id: scene.id }).update({ sfx: json(cues) });
+  }
+  await fsp.rm(asset.path, { force: true }).catch(() => {});
+  await invalidateAssembly(filmId);
+  return { deleted: true };
 }
 
 // --- characters ------------------------------------------------------------
@@ -440,24 +569,77 @@ export async function deleteCharacter(userId, characterId) {
   return { deleted: true };
 }
 
-// --- generation ------------------------------------------------------------
-function scenePrompt(film, scene, characters) {
-  const style = film.style;
-  const cast = characters.filter((c) => (scene.visual_prompt || '').toLowerCase().includes(String(c.name).toLowerCase())
-    || (scene.dialogue || '').toLowerCase().includes(String(c.name).toLowerCase()));
-  const appearance = cast.length ? ` Consistent cast: ${cast.map((c) => `${c.name} (${c.appearance_prompt})`).join('; ')}.` : '';
-  const dialogue = parseJson(scene.dialogue, []).map((d) => `${d.character}: ${d.line}`).join(' | ');
-  return [scene.visual_prompt || scene.description, `Setting: ${scene.location}, ${scene.time_of_day}.`,
-    `Camera: ${scene.camera_movement || 'cinematic'}.`, dialogue ? `Dialogue context: ${dialogue}.` : '',
-    appearance, `${style} visual style, ${film.genre} drama, no text, no watermark, no logos, high production value.`]
-    .filter(Boolean).join(' ').slice(0, 4000);
+// --- prompts & continuity --------------------------------------------------
+function sceneCast(film, scene, characters) {
+  const declared = parseJson(scene.cast, []).map((name) => String(name).toLowerCase());
+  const text = `${scene.visual_prompt || ''} ${scene.description || ''} ${scene.heading || ''}`.toLowerCase();
+  const dialogueNames = parseJson(scene.dialogue, []).map((line) => String(line.character || '').toLowerCase());
+  return characters.filter((character) => {
+    const name = String(character.name || '').toLowerCase();
+    return declared.includes(name) || dialogueNames.includes(name) || (name && text.includes(name));
+  });
 }
 
-async function referenceImageFor(film, scene, characters) {
-  if (film.reference_image_path && fs.existsSync(film.reference_image_path)) return film.reference_image_path;
-  const names = `${scene.visual_prompt} ${scene.description} ${scene.dialogue}`.toLowerCase();
-  const match = characters.find((c) => c.reference_image_path && names.includes(String(c.name).toLowerCase()));
-  return match?.reference_image_path || null;
+/**
+ * Build the provider prompt with explicit continuity anchors.
+ *
+ * Faces, wardrobe, hairstyles, locations and the story bible are repeated in
+ * every scene so separate predictions stay visually consistent; image-to-video
+ * models additionally receive the strongest available reference image.
+ */
+export function scenePrompt(film, scene, characters = []) {
+  const cast = sceneCast(film, scene, characters);
+  const bible = parseJson(film.story_bible, {});
+  const metadata = parseJson(film.metadata, {});
+  const dialogue = parseJson(scene.dialogue, []).map((line) => `${line.character}: ${line.line}`).join(' | ');
+  const castBlock = cast.length
+    ? `CONSISTENT CAST — identical face, hair, age and wardrobe in this shot: ${cast.map((character) => `${character.name} (${character.appearance_prompt || character.description || character.role})`).join('; ')}.`
+    : '';
+  return [
+    `${film.style} ${film.genre} film scene. ${scene.visual_prompt || scene.description || scene.heading}`,
+    `Setting: ${scene.location || 'unspecified'}; time of day: ${scene.time_of_day || 'unspecified'}.`,
+    castBlock,
+    `Camera: ${scene.camera_movement || 'cinematic'}.`,
+    dialogue ? `Dialogue context (do not render text): ${dialogue}.` : '',
+    bible.world ? `World: ${bible.world}.` : '',
+    bible.continuity_notes ? `Continuity: ${bible.continuity_notes}.` : '',
+    metadata.continuity ? `Production continuity: ${metadata.continuity}.` : '',
+    `Aspect ratio ${film.aspect_ratio}, ${film.language} language production, ${film.style} visual style, no on-screen text, no subtitles, no watermark, no logos, high production value.`,
+  ].filter(Boolean).join(' ').slice(0, 4000);
+}
+
+function referenceImageFor(film, scene, characters = []) {
+  const exists = (value) => value && fs.existsSync(value);
+  if (exists(film.reference_image_path)) return film.reference_image_path;
+  const metadata = parseJson(film.metadata, {});
+  if (exists(metadata.characterSheet)) return metadata.characterSheet;
+  const cast = sceneCast(film, scene, characters);
+  const preferred = cast.find((character) => exists(character.reference_image_path))
+    || characters.find((character) => exists(character.reference_image_path));
+  return preferred?.reference_image_path || null;
+}
+
+// --- generation ------------------------------------------------------------
+async function characterRowsFor(userId, filmId, film) {
+  return db('film_characters')
+    .where({ user_id: userId })
+    .where((q) => q.where({ film_id: filmId }).orWhere({ series_id: film.series_id || '' }));
+}
+
+async function cancelSceneJobRows(sceneId, attempt) {
+  await db('jobs').where({ dedupe_key: `film_scene_job:${sceneId}:${attempt}` })
+    .whereIn('status', ['queued', 'running'])
+    .update({ status: 'cancelled', completed_at: now(), locked_at: null, locked_by: null, updated_at: now() })
+    .catch(() => {});
+}
+
+/** Refund one scene reservation exactly once for its attempt number. */
+async function refundSceneAttempt(userId, scene, reason) {
+  await refundCredits(userId, number(scene.credits_cost), {
+    idempotencyKey: `film_scene_refund:${scene.id}:${number(scene.attempts)}`,
+    referenceType: 'film_scene', referenceId: scene.id,
+    metadata: { sceneId: scene.id, attempt: number(scene.attempts), reason },
+  });
 }
 
 /**
@@ -465,32 +647,45 @@ async function referenceImageFor(film, scene, characters) {
  * enqueue the polling job. Regenerating a scene never touches other scenes.
  */
 export async function requestSceneGeneration(userId, filmId, sceneId, role = 'user') {
-  await ownedFilm(userId, filmId, role);
+  const film = await ownedFilm(userId, filmId, role);
   const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
   if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
-  if (scene.status === 'queued' || scene.status === 'processing') {
-    throw new AppError(409, 'scene_busy', 'This scene is already generating. Wait for it to finish or fail.');
+  if (ACTIVE_SCENE_STATUSES.includes(scene.status)) {
+    throw new AppError(409, 'scene_busy', 'This scene is already generating. Wait for it to finish or cancel it.');
   }
-  requireVideoProvider();
+  const provider = resolveVideoProvider(filmSceneProvider(film));
+  if (film.run_state !== 'running') {
+    await db('film_projects').where({ id: filmId }).update({ run_state: 'running', run_started_at: film.run_started_at || now(), error: null, updated_at: now() });
+  }
+  await startSceneGeneration({ film, userId, scene, provider });
+  await refreshFilmProgress(filmId);
+  return sceneView(await db('film_scenes').where({ id: sceneId }).first());
+}
+
+/**
+ * Claim + start one scene job. `alreadyClaimed` is used by the dispatcher which
+ * atomically moved the row from planned → processing.
+ */
+async function startSceneGeneration({ film, userId, scene, provider, alreadyClaimed = false }) {
+  const sceneId = scene.id;
   const cost = sceneCreditCost(scene);
   const attempt = number(scene.attempts) + 1;
   const reserveKey = `film_scene_reserve:${sceneId}:${attempt}`;
-  const film = await db('film_projects').where({ id: filmId }).first();
   // Claim the attempt number FIRST. If the provider start fails, the attempt is
   // still consumed so a retry gets fresh reserve/refund keys and cannot double
   // refund credits that were never held.
   await db('film_scenes').where({ id: sceneId }).update({
-    status: 'processing', stage: 'starting_provider', progress: 2,
+    status: 'processing', stage: alreadyClaimed ? 'starting_provider' : 'starting_provider', progress: 2,
     detail: 'Reserving credits and starting AI provider',
-    attempts: attempt, credits_cost: cost, error: null, updated_at: now(),
+    attempts: attempt, credits_cost: cost, error: null, cancel_requested: 0,
+    queued_at: now(), updated_at: now(),
   });
   try {
     await reserveCredits(userId, cost, {
       idempotencyKey: reserveKey, referenceType: 'film_scene', referenceId: sceneId,
-      metadata: { filmId, attempt, seconds: number(scene.duration_seconds) },
+      metadata: { filmId: film.id, attempt, seconds: number(scene.duration_seconds) },
     });
   } catch (error) {
-    // No credits were held, so consume no attempt and restore the scene.
     await db('film_scenes').where({ id: sceneId }).update({
       status: scene.status, stage: scene.stage, progress: number(scene.progress),
       detail: scene.detail, attempts: number(scene.attempts),
@@ -501,53 +696,275 @@ export async function requestSceneGeneration(userId, filmId, sceneId, role = 'us
 
   let handle;
   try {
-    const characters = await db('film_characters').where({ user_id: userId }).where((q) => q.where({ film_id: filmId }).orWhere({ series_id: film.series_id || '' }));
+    const characters = await characterRowsFor(userId, film.id, film);
     handle = await startVideoGeneration({
       prompt: scenePrompt(film, scene, characters),
-      referenceImagePath: await referenceImageFor(film, scene, characters),
+      referenceImagePath: referenceImageFor(film, scene, characters),
       seconds: number(scene.duration_seconds, config.film.maxSceneSeconds),
       aspectRatio: film.aspect_ratio,
+      provider,
     });
   } catch (error) {
-    await failScene({ ...scene, attempts: attempt, credits_cost: cost }, film, `AI provider start failed: ${error.message}`);
+    await failScene({ ...scene, attempts: attempt, credits_cost: cost, user_id: userId }, film, `AI provider start failed: ${error.message}`);
     throw error;
   }
 
   const timestamp = now();
   await db('film_scenes').where({ id: sceneId }).update({
     status: 'queued', stage: 'queued', progress: 5,
-    detail: `${handle.provider} prediction started`,
+    detail: `${handle.provider} prediction started (${handle.providerSeconds || number(scene.duration_seconds)}s clip)`,
     provider: handle.provider, provider_job_id: handle.providerJobId,
     provider_handle: json(handle), credits_cost: cost, attempts: attempt,
-    error: null, updated_at: timestamp,
+    cancel_requested: 0, error: null, updated_at: timestamp,
   });
-  await db('film_projects').where({ id: filmId }).update({ status: 'generating', stage: 'generating', error: null, updated_at: timestamp });
-  await addJob('film_generate_scene', { filmId, sceneId, userId, attempt }, {
+  await db('film_projects').where({ id: film.id }).update({ status: 'generating', stage: 'generating', error: null, updated_at: timestamp });
+  await addJob('film_generate_scene', { filmId: film.id, sceneId, userId, attempt }, {
     dedupeKey: `film_scene_job:${sceneId}:${attempt}`, priority: 5,
   });
-  return sceneView(await db('film_scenes').where({ id: sceneId }).first());
+  return { attempt, provider: handle.provider, providerSeconds: handle.providerSeconds };
+}
+
+/**
+ * Start as many planned scenes as the concurrency budget allows. Called when a
+ * batch is requested and again whenever a scene finishes, is cancelled, or the
+ * run is resumed.
+ */
+export async function dispatchPlannedScenes(filmId, { keepAlive = false } = {}) {
+  const film = await db('film_projects').where({ id: filmId }).first();
+  if (!film) return { started: 0, reason: 'film_missing' };
+  if (film.run_state === 'cancelled' || film.run_state === 'paused') return { started: 0, reason: film.run_state };
+  const active = number((await db('film_scenes').where({ film_id: filmId }).whereIn('status', ACTIVE_SCENE_STATUSES).count('* as count').first())?.count);
+  const slots = Math.max(0, config.film.sceneConcurrency - active);
+  if (!slots) return { started: 0, reason: 'concurrency', active };
+  const planned = await db('film_scenes').where({ film_id: filmId, status: 'planned' }).orderBy('ordinal', 'asc').limit(slots);
+  if (!planned.length) return { started: 0, reason: 'nothing_planned', active };
+
+  let started = 0;
+  const errors = [];
+  for (const scene of planned) {
+    const fresh = await db('film_projects').where({ id: filmId }).first();
+    if (!fresh || fresh.run_state === 'paused' || fresh.run_state === 'cancelled') break;
+    const claimed = await db('film_scenes').where({ id: scene.id, status: 'planned' }).update({
+      status: 'processing', stage: 'starting_provider', progress: 1, detail: 'Queued for a provider slot', updated_at: now(),
+    });
+    if (!claimed) continue;
+    try {
+      const provider = resolveVideoProvider(filmSceneProvider(fresh));
+      await startSceneGeneration({ film: fresh, userId: fresh.user_id, scene: { ...scene, status: 'processing' }, provider, alreadyClaimed: true });
+      started += 1;
+    } catch (error) {
+      errors.push({ sceneId: scene.id, message: error.message });
+      // Insufficient credits or a missing provider stops the whole run — the
+      // remaining scenes stay planned so the user can top up and resume.
+      if (['insufficient_credits', 'video_provider_unavailable'].includes(error.code)) {
+        await db('film_projects').where({ id: filmId }).update({ run_state: 'paused', detail: `Paused: ${error.message}`, run_stopped_at: now(), updated_at: now() });
+        break;
+      }
+    }
+  }
+  if (started) await refreshFilmProgress(filmId);
+  else if (keepAlive) await refreshFilmProgress(filmId);
+  return { started, errors, active };
 }
 
 /** Queue every draft/failed scene that is not already in flight. */
-export async function requestAllScenes(userId, filmId, role = 'user') {
-  await ownedFilm(userId, filmId, role);
+export async function queueFilmScenes(userId, filmId, { sceneIds = null, role = 'user' } = {}) {
+  const film = await ownedFilm(userId, filmId, role);
   const scenes = await db('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc');
   if (!scenes.length) throw new AppError(409, 'no_scenes', 'Write a screenplay first — there are no scenes to generate.');
-  requireVideoProvider();
+  const provider = resolveVideoProvider(filmSceneProvider(film));
+  const target = sceneIds && sceneIds.length
+    ? scenes.filter((scene) => sceneIds.includes(scene.id))
+    : scenes.filter((scene) => PENDING_SCENE_STATUSES.includes(scene.status) && scene.status !== 'planned');
   const estimate = estimateFilm(scenes.map((s) => ({ duration_seconds: number(s.duration_seconds), dialogue: parseJson(s.dialogue, []) })));
   const balance = await getBalance(userId);
-  const pending = scenes.filter((s) => !['ready', 'queued', 'processing'].includes(s.status));
-  const needed = pending.reduce((n, s) => n + sceneCreditCost(s), 0);
-  if (needed > balance) {
-    throw new AppError(402, 'insufficient_credits', `Generating ${pending.length} scenes needs ${needed} credits; your balance is ${balance}. Generate individual scenes or add credits.`, { required: needed, balance, estimate });
+  const needed = target.reduce((n, s) => n + sceneCreditCost(s), 0);
+  if (needed > balance && target.length) {
+    throw new AppError(402, 'insufficient_credits', `Generating ${target.length} scenes needs ${needed} credits; your balance is ${balance}. Generate individual scenes, reduce the film length, or add credits.`, { required: needed, balance, estimate });
   }
-  const queued = []; const skipped = []; const errors = [];
-  for (const scene of pending) {
-    try { queued.push(await requestSceneGeneration(userId, filmId, scene.id, role)); }
-    catch (error) { errors.push({ sceneId: scene.id, message: error.message }); }
+  if (!target.length) {
+    return { queued: 0, planned: 0, skipped: scenes.length, errors: [], estimate, balance, provider };
   }
-  for (const scene of scenes.filter((s) => ['ready', 'queued', 'processing'].includes(s.status))) skipped.push(scene.id);
-  return { queued: queued.length, skipped: skipped.length, errors, estimate, balance };
+  await db('film_projects').where({ id: filmId }).update({
+    run_state: 'running', run_started_at: film.run_started_at || now(), run_stopped_at: null, error: null, updated_at: now(),
+  });
+  await db('film_scenes').whereIn('id', target.map((scene) => scene.id)).update({
+    status: 'planned', stage: 'planned', progress: 0, detail: 'Waiting for a provider slot',
+    cancel_requested: 0, error: null, updated_at: now(),
+  });
+  const dispatch = await dispatchPlannedScenes(filmId, { keepAlive: true });
+  await refreshFilmProgress(filmId);
+  await notify(userId, {
+    type: 'film_generation_started', title: 'Film generation started',
+    body: `${film.title}: ${target.length} scene(s) queued across ${provider}. ${dispatch.started} started immediately.`,
+    actionUrl: `/films/${filmId}`,
+  }).catch(() => {});
+  return {
+    queued: dispatch.started,
+    planned: Math.max(0, target.length - dispatch.started),
+    skipped: scenes.length - target.length,
+    errors: dispatch.errors || [],
+    estimate,
+    balance: await getBalance(userId),
+    provider,
+  };
+}
+
+export async function requestAllScenes(userId, filmId, role = 'user') {
+  const result = await queueFilmScenes(userId, filmId, { role });
+  return { ...result, total: result.queued + result.planned };
+}
+
+export async function pauseFilmGeneration(userId, filmId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  if (film.status === 'assembling') throw new AppError(409, 'assembly_busy', 'The film is currently rendering; cancel the render first.');
+  await db('film_projects').where({ id: filmId }).update({
+    run_state: 'paused', status: 'paused', stage: 'paused',
+    detail: 'Generation paused — in-flight scenes will finish, no new scenes will start.',
+    run_stopped_at: now(), updated_at: now(),
+  });
+  const counts = await sceneStatusCounts(filmId);
+  return { paused: true, ...counts };
+}
+
+export async function resumeFilmGeneration(userId, filmId, role = 'user') {
+  await ownedFilm(userId, filmId, role);
+  const pending = await db('film_scenes').where({ film_id: filmId, status: 'planned' }).count('* as count').first();
+  if (!number(pending?.count)) {
+    const counts = await sceneStatusCounts(filmId);
+    await db('film_projects').where({ id: filmId }).update({ run_state: counts.busy || counts.planned ? 'running' : 'idle', status: counts.ready === counts.total && counts.total ? 'ready' : 'draft', updated_at: now() });
+    return { resumed: false, reason: 'nothing_planned', ...counts };
+  }
+  await db('film_projects').where({ id: filmId }).update({
+    run_state: 'running', status: 'generating', stage: 'generating',
+    detail: 'Generation resumed', run_stopped_at: null, error: null, updated_at: now(),
+  });
+  const dispatch = await dispatchPlannedScenes(filmId, { keepAlive: true });
+  await refreshFilmProgress(filmId);
+  return { resumed: true, started: dispatch.started, ...(await sceneStatusCounts(filmId)) };
+}
+
+/**
+ * Cancel one scene's generation: cancel the provider job when supported,
+ * refund the reservation exactly once, and never attach a late result.
+ */
+export async function cancelSceneGeneration(userId, filmId, sceneId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
+  if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
+  if (scene.status === 'ready') throw new AppError(409, 'scene_ready', 'This scene already has a real clip. Regenerate it instead.');
+  if (scene.status === 'planned' || scene.status === 'draft') {
+    await db('film_scenes').where({ id: sceneId }).update({ status: 'draft', stage: 'draft', progress: 0, detail: null, cancel_requested: 0, updated_at: now() });
+    await refreshFilmProgress(filmId);
+    return { cancelled: true, refunded: 0, providerCancelled: false };
+  }
+  const handle = parseJson(scene.provider_handle, null);
+  const providerResult = handle ? await cancelVideoGeneration(handle) : { cancelled: false, supported: false };
+  await refundSceneAttempt(film.user_id || userId, scene, 'cancelled_by_user');
+  await cancelSceneJobRows(sceneId, number(scene.attempts));
+  await db('film_scenes').where({ id: sceneId }).update({
+    status: 'cancelled', stage: 'cancelled', progress: 0,
+    detail: providerResult.cancelled ? 'Cancelled — provider job stopped' : 'Cancelled — provider job cannot be stopped; its result will be discarded',
+    error: null, provider_handle: null, cancel_requested: 1, updated_at: now(),
+  });
+  await refreshFilmProgress(filmId);
+  return { cancelled: true, refunded: number(scene.credits_cost), providerCancelled: Boolean(providerResult.cancelled), providerReason: providerResult.reason || null };
+}
+
+/** Cancel the entire run: stop provider jobs where possible, refund, keep clips. */
+export async function cancelFilmGeneration(userId, filmId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  await db('film_projects').where({ id: filmId }).update({
+    run_state: 'cancelled', status: 'draft', stage: 'draft',
+    detail: 'Generation cancelled — finished clips were kept.', run_stopped_at: now(), updated_at: now(),
+  });
+  await db('film_projects').where({ id: filmId }).update({ assembly_cancel_requested: 1 });
+  const scenes = await db('film_scenes').where({ film_id: filmId }).whereIn('status', ['planned', 'queued', 'processing']);
+  let refunded = 0;
+  let cancelledActive = 0;
+  let returnedToDraft = 0;
+  for (const scene of scenes) {
+    if (scene.status === 'planned') {
+      await db('film_scenes').where({ id: scene.id }).update({ status: 'draft', stage: 'draft', progress: 0, detail: null, updated_at: now() });
+      returnedToDraft += 1;
+      continue;
+    }
+    cancelledActive += 1;
+    const handle = parseJson(scene.provider_handle, null);
+    if (handle) await cancelVideoGeneration(handle);
+    await refundSceneAttempt(film.user_id || userId, scene, 'run_cancelled');
+    await cancelSceneJobRows(scene.id, number(scene.attempts));
+    refunded += number(scene.credits_cost);
+    await db('film_scenes').where({ id: scene.id }).update({
+      status: 'cancelled', stage: 'cancelled', progress: 0, detail: 'Run cancelled',
+      provider_handle: null, cancel_requested: 1, updated_at: now(),
+    });
+  }
+  await refreshFilmProgress(filmId);
+  return { cancelled: true, refunded, scenes: cancelledActive, drafted: returnedToDraft };
+}
+
+/** Requeue every failed/cancelled scene that has no real clip. */
+export async function retryFailedScenes(userId, filmId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  const scenes = await db('film_scenes').where({ film_id: filmId }).whereIn('status', ['failed', 'cancelled']);
+  if (!scenes.length) return { retried: 0, planned: 0, errors: [], balance: await getBalance(userId) };
+  const result = await queueFilmScenes(userId, filmId, { sceneIds: scenes.map((scene) => scene.id), role });
+  return { ...result, retried: result.queued + result.planned };
+}
+
+export async function sceneStatusCounts(filmId) {
+  const rows = await db('film_scenes').where({ film_id: filmId }).select('status');
+  const counts = { total: rows.length, ready: 0, failed: 0, cancelled: 0, planned: 0, queued: 0, processing: 0, draft: 0 };
+  for (const row of rows) {
+    if (counts[row.status] !== undefined) counts[row.status] += 1;
+  }
+  counts.active = counts.queued + counts.processing;
+  counts.busy = counts.active;
+  return counts;
+}
+
+/** Lightweight polling payload for the workspace progress panel. */
+export async function filmProgress(userId, filmId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  const counts = await sceneStatusCounts(filmId);
+  const activeScenes = await db('film_scenes')
+    .where({ film_id: filmId })
+    .whereIn('status', ['queued', 'processing'])
+    .orderBy('ordinal', 'asc')
+    .select('id', 'ordinal', 'status', 'progress', 'detail', 'provider');
+  const summary = (await sceneSummary([filmId])).get(filmId);
+  const eta = await estimateRemaining(filmId, counts);
+  return {
+    filmId,
+    status: film.status,
+    runState: film.run_state || 'idle',
+    progress: counts.total ? Math.round((counts.ready / counts.total) * 100) : 0,
+    detail: film.detail || null,
+    error: film.error || null,
+    counts,
+    etaSeconds: eta,
+    activeScenes: activeScenes.map((scene) => ({
+      id: scene.id, ordinal: number(scene.ordinal), status: scene.status,
+      progress: number(scene.progress), detail: scene.detail, provider: scene.provider || null,
+    })),
+    summary,
+    sceneConcurrency: config.film.sceneConcurrency,
+  };
+}
+
+async function estimateRemaining(filmId, counts) {
+  const remaining = counts.total - counts.ready;
+  if (!remaining) return 0;
+  const done = await db('film_scenes').where({ film_id: filmId, status: 'ready' }).whereNotNull('queued_at')
+    .select('queued_at', 'updated_at').limit(40);
+  const durations = done
+    .map((row) => (Date.parse(row.updated_at) - Date.parse(row.queued_at)) / 1000)
+    .filter((value) => Number.isFinite(value) && value > 0 && value < 3600);
+  if (!durations.length) return null;
+  const average = durations.reduce((n, value) => n + value, 0) / durations.length;
+  const lanes = Math.max(1, Math.min(config.film.sceneConcurrency, remaining));
+  return Math.round((remaining * average) / lanes);
 }
 
 /** Worker handler. Resumable: provider handle is read from the DB each time. */
@@ -558,6 +975,12 @@ export async function processFilmSceneJob(payload = {}) {
   if (!['queued', 'processing'].includes(scene.status)) return { ok: true, reason: 'already_final', status: scene.status };
   const film = await db('film_projects').where({ id: filmId }).first();
   if (!film) return { ok: false, reason: 'film_missing' };
+  if (film.run_state === 'cancelled') {
+    await refundSceneAttempt(film.user_id || userId, scene, 'run_cancelled');
+    await db('film_scenes').where({ id: sceneId }).update({ status: 'cancelled', stage: 'cancelled', progress: 0, detail: 'Run cancelled', provider_handle: null, updated_at: now() });
+    await refreshFilmProgress(filmId);
+    return { ok: true, cancelled: true, reason: 'run_cancelled' };
+  }
   const handle = parseJson(scene.provider_handle, null);
   if (!handle) return await failScene(scene, film, 'Provider handle missing — regenerate this scene.');
 
@@ -568,6 +991,22 @@ export async function processFilmSceneJob(payload = {}) {
   let lastProgress = 10;
 
   while (Date.now() < deadline) {
+    // Cancellation is checked every poll so a cancel request takes effect
+    // before a late provider result can be attached to the scene.
+    const live = await db('film_scenes').where({ id: sceneId }).first();
+    const liveFilm = await db('film_projects').where({ id: filmId }).first();
+    if (!live) return { ok: false, reason: 'scene_missing' };
+    if (number(live.cancel_requested) === 1 || liveFilm?.run_state === 'cancelled') {
+      await cancelVideoGeneration(handle);
+      await refundSceneAttempt(film.user_id || userId, live, 'cancelled_during_poll');
+      await db('film_scenes').where({ id: sceneId }).update({
+        status: 'cancelled', stage: 'cancelled', progress: 0,
+        detail: 'Cancelled during generation', error: null, provider_handle: null, updated_at: now(),
+      });
+      await refreshFilmProgress(filmId);
+      return { ok: true, cancelled: true, sceneId };
+    }
+
     let poll;
     try {
       poll = await pollVideoGeneration(handle);
@@ -579,7 +1018,11 @@ export async function processFilmSceneJob(payload = {}) {
       }
       return await failScene(scene, film, `AI provider error: ${error.message}`);
     }
-    if (poll.done && poll.error) return await failScene(scene, film, poll.error);
+    if (poll.done && poll.error) {
+      await failScene(scene, film, poll.error);
+      await dispatchPlannedScenes(filmId).catch(() => {});
+      return { ok: false, sceneId, error: poll.error };
+    }
     if (poll.done) {
       try {
         const dir = await ensureProjectDir(`film_${filmId}`);
@@ -587,22 +1030,33 @@ export async function processFilmSceneJob(payload = {}) {
         await fsp.mkdir(scenesDir, { recursive: true });
         const clipPath = path.join(scenesDir, `clip-${number(scene.ordinal)}-${attempt || number(scene.attempts)}.mp4`);
         await downloadProviderVideo(poll, clipPath);
+        // A provider "success" with an empty/corrupt file is a failure, not a scene.
+        const probe = await probeVideo(clipPath);
+        if (!probe.hasVideo || probe.durationSeconds < 0.2) {
+          await fsp.rm(clipPath, { force: true }).catch(() => {});
+          await failScene(scene, film, 'The provider reported success but returned a file without a usable video stream. No clip was accepted.');
+          await dispatchPlannedScenes(filmId).catch(() => {});
+          return { ok: false, sceneId, error: 'clip_invalid' };
+        }
         const posterPath = path.join(scenesDir, `poster-${number(scene.ordinal)}.jpg`);
         await ffmpeg(['-ss', '0.2', '-i', clipPath, '-frames:v', '1', '-q:v', '3', posterPath]).catch(() => {});
         await db('film_scenes').where({ id: sceneId }).update({
           status: 'ready', stage: 'ready', progress: 100,
-          detail: `Real clip from ${handle.provider}`, clip_path: clipPath,
+          detail: `Real ${handle.provider} clip (${probe.durationSeconds.toFixed(1)}s)`, clip_path: clipPath,
           poster_path: fs.existsSync(posterPath) ? posterPath : null,
-          error: null, updated_at: now(),
+          error: null, provider_handle: null, updated_at: now(),
         });
         await db('film_projects').where({ id: filmId }).update({
           credits_spent: db.raw('credits_spent + ?', [number(scene.credits_cost)]), updated_at: now(),
         });
         await invalidateAssembly(filmId);
         await refreshFilmProgress(filmId);
-        return { ok: true, sceneId, provider: handle.provider, clipPath };
+        await dispatchPlannedScenes(filmId).catch(() => {});
+        return { ok: true, sceneId, provider: handle.provider, clipPath, seconds: probe.durationSeconds };
       } catch (error) {
-        return await failScene(scene, film, `Could not store provider clip: ${error.message}`);
+        await failScene(scene, film, `Could not store provider clip: ${error.message}`);
+        await dispatchPlannedScenes(filmId).catch(() => {});
+        return { ok: false, sceneId, error: error.message };
       }
     }
     const progress = Math.max(lastProgress, Math.min(90, Number(poll.progress) || 30));
@@ -611,7 +1065,9 @@ export async function processFilmSceneJob(payload = {}) {
     await refreshFilmProgress(filmId);
     await sleep(config.film.pollIntervalMs);
   }
-  return await failScene(scene, film, `AI provider did not finish within ${Math.round(maxDuration / 60000)} minutes. The prediction may still be running at the provider; check ${handle.providerJobId}.`);
+  await failScene(scene, film, `AI provider did not finish within ${Math.round(maxDuration / 60000)} minutes. The prediction may still be running at the provider; check ${handle.providerJobId}.`);
+  await dispatchPlannedScenes(filmId).catch(() => {});
+  return { ok: false, sceneId, error: 'provider_timeout' };
 }
 
 async function failScene(scene, film, message) {
@@ -624,7 +1080,7 @@ async function failScene(scene, film, message) {
   await db('film_scenes').where({ id: scene.id }).update({
     status: 'failed', stage: 'failed', progress: 0,
     detail: null, error: String(message).slice(0, 2000),
-    provider_handle: null, updated_at: now(),
+    provider_handle: null, cancel_requested: 0, updated_at: now(),
   });
   await refreshFilmProgress(film.id);
   await notify(film.user_id, {
@@ -635,29 +1091,67 @@ async function failScene(scene, film, message) {
   return { ok: false, sceneId: scene.id, error: String(message) };
 }
 
+/**
+ * Called when a scene job exhausts its retries outside the polling loop (for
+ * example the worker crashed mid-poll). The scene is failed and refunded rather
+ * than being left "processing" forever with no job watching it.
+ */
+export async function handleSceneJobFailure(payload = {}, error) {
+  const { filmId, sceneId } = payload;
+  if (!filmId || !sceneId) return { ok: false, reason: 'payload_incomplete' };
+  const scene = await db('film_scenes').where({ id: sceneId }).first();
+  const film = await db('film_projects').where({ id: filmId }).first();
+  if (!scene || !film) return { ok: false, reason: 'missing' };
+  if (!['queued', 'processing'].includes(scene.status)) return { ok: true, reason: 'already_final' };
+  const result = await failScene(scene, film, `Background job failed: ${error?.message || error}`);
+  await dispatchPlannedScenes(filmId).catch(() => {});
+  return result;
+}
+
 export async function refreshFilmProgress(filmId) {
   const scenes = await db('film_scenes').where({ film_id: filmId }).select('status', 'progress');
   if (!scenes.length) return;
   const ready = scenes.filter((s) => s.status === 'ready').length;
   const failed = scenes.filter((s) => s.status === 'failed').length;
-  const busy = scenes.filter((s) => s.status === 'queued' || s.status === 'processing').length;
+  const cancelled = scenes.filter((s) => s.status === 'cancelled').length;
+  const planned = scenes.filter((s) => s.status === 'planned').length;
+  const busy = scenes.filter((s) => ACTIVE_SCENE_STATUSES.includes(s.status)).length;
   const progress = Math.round((ready / scenes.length) * 100);
   const current = await db('film_projects').where({ id: filmId }).first();
+  if (!current) return;
   const protectedStatuses = ['completed', 'published', 'assembling', 'failed'];
+  const counts = { ready, failed, cancelled, planned, busy, total: scenes.length };
   let stage = ready === scenes.length ? 'ready_to_assemble' : ready > 0 ? 'partial' : 'screenplay';
-  let status = busy > 0 ? 'generating' : ready === scenes.length ? 'ready' : 'draft';
-  if (busy > 0) stage = 'generating';
+  if (busy > 0 || planned > 0) stage = 'generating';
+  let status = busy > 0 || planned > 0 ? 'generating' : ready === scenes.length ? 'ready' : 'draft';
+  if (current.run_state === 'paused') { status = 'paused'; stage = 'paused'; }
+  if (current.run_state === 'cancelled') { status = 'draft'; stage = 'draft'; }
   const updates = {
-    progress, stage,
-    detail: `${ready}/${scenes.length} scenes ready${failed ? `, ${failed} failed` : ''}${busy ? `, ${busy} generating` : ''}`,
+    progress,
+    stage,
+    detail: `${ready}/${scenes.length} scenes ready${failed ? `, ${failed} failed` : ''}${cancelled ? `, ${cancelled} cancelled` : ''}${planned ? `, ${planned} queued` : ''}${busy ? `, ${busy} generating` : ''}`,
     updated_at: now(),
   };
-  if (!protectedStatuses.includes(current?.status)) updates.status = status;
+  if (!protectedStatuses.includes(current.status)) updates.status = status;
+  else if (current.status === 'failed' && ready > 0) updates.status = status;
   await db('film_projects').where({ id: filmId }).update(updates);
+  return counts;
+}
+
+/**
+ * Worker sweep: keeps `planned` scenes moving even if no completion event fired
+ * (for example after a restart or a worker crash). Cheap single query.
+ */
+export async function sweepFilmGenerations() {
+  const rows = await db('film_scenes').where({ status: 'planned' }).distinct('film_id').limit(20);
+  for (const row of rows) {
+    await dispatchPlannedScenes(row.film_id).catch(() => {});
+  }
+  return rows.length;
 }
 
 // --- assembly --------------------------------------------------------------
-export async function requestAssembly(userId, filmId, { subtitles = true } = {}, role = 'user') {
+export async function requestAssembly(userId, filmId, { subtitles, burnSubtitles } = {}, role = 'user') {
   await ownedFilm(userId, filmId, role);
   const pre = await assemblyPreflight(filmId);
   if (!pre.ready) {
@@ -665,37 +1159,72 @@ export async function requestAssembly(userId, filmId, { subtitles = true } = {},
   }
   const existing = await db('film_projects').where({ id: filmId }).first();
   if (existing.status === 'assembling') throw new AppError(409, 'assembly_busy', 'An assembly is already in progress.');
+  const metadata = parseJson(existing.metadata, {});
+  const wantsSubtitles = subtitles === undefined ? metadata.subtitles !== false : Boolean(subtitles);
+  const burn = burnSubtitles === undefined ? (wantsSubtitles && pre.duration <= config.film.burnInMaxSeconds) : Boolean(burnSubtitles);
   const cost = assemblyCreditCost(pre.scenes.map((s) => ({ dialogue: parseJson(s.dialogue, []) })));
   const attempt = number((await db('film_scenes').where({ film_id: filmId }).max('attempts as m').first())?.m) + 1;
   const reserveKey = `film_assembly_reserve:${filmId}:${attempt}`;
   await reserveCredits(userId, cost, {
     idempotencyKey: reserveKey, referenceType: 'film', referenceId: filmId,
-    metadata: { attempt, subtitles },
+    metadata: { attempt, subtitles: wantsSubtitles, burnSubtitles: burn },
   });
   await db('film_projects').where({ id: filmId }).update({
-    status: 'assembling', stage: 'assembling', progress: 0, detail: 'Render queued', error: null, updated_at: now(),
+    status: 'assembling', stage: 'assembling', progress: 0, detail: 'Render queued',
+    error: null, assembly_cancel_requested: 0, updated_at: now(),
   });
-  await addJob('film_assemble', { filmId, userId, attempt, subtitles }, {
-    dedupeKey: `film_assembly_job:${filmId}:${attempt}`, priority: 4,
+  await addJob('film_assemble', { filmId, userId, attempt, subtitles: wantsSubtitles, burnSubtitles: burn }, {
+    dedupeKey: `film_assembly_job:${filmId}:${attempt}`, priority: 4, maxAttempts: 2,
   });
-  return { queued: true, creditsReserved: cost, sceneCount: pre.scenes.length, durationSeconds: pre.duration };
+  return {
+    queued: true, creditsReserved: cost, sceneCount: pre.scenes.length,
+    durationSeconds: pre.duration, segments: pre.segments,
+    estimatedRenderBytes: pre.estimatedRenderBytes,
+    subtitles: wantsSubtitles ? (burn ? 'burned-in' : 'soft-track') : 'none',
+  };
+}
+
+export async function cancelFilmAssembly(userId, filmId, role = 'user') {
+  const film = await ownedFilm(userId, filmId, role);
+  if (film.status !== 'assembling') return { cancelling: false, reason: 'not_rendering' };
+  await db('film_projects').where({ id: filmId }).update({
+    assembly_cancel_requested: 1, detail: 'Cancelling render…', updated_at: now(),
+  });
+  await db('jobs').where({ type: 'film_assemble', status: 'queued' }).where('payload', 'like', `%${filmId}%`)
+    .update({ status: 'cancelled', completed_at: now(), updated_at: now() }).catch(() => {});
+  return { cancelling: true };
 }
 
 export async function processFilmAssemblyJob(payload = {}) {
-  const { filmId, userId, attempt = 1, subtitles = true } = payload;
+  const { filmId, userId, attempt = 1, subtitles = true, burnSubtitles } = payload;
   const film = await db('film_projects').where({ id: filmId }).first();
   if (!film) return { ok: false, reason: 'film_missing' };
   const scenes = await db('film_scenes').where({ film_id: filmId });
   const cost = assemblyCreditCost(scenes.map((s) => ({ dialogue: parseJson(s.dialogue, []) })));
+  let cancelled = false;
+  let lastPoll = 0;
+  const shouldCancel = () => cancelled;
   try {
     const result = await assembleFilm(filmId, {
       subtitles,
+      burnSubtitles,
+      shouldCancel,
       onProgress: async (progress, stage) => {
+        // Poll the DB flag at most every second while FFmpeg reports progress.
+        if (Date.now() - lastPoll > 1000) {
+          lastPoll = Date.now();
+          const live = await db('film_projects').where({ id: filmId }).first();
+          if (number(live?.assembly_cancel_requested) === 1) cancelled = true;
+        }
         await db('film_projects').where({ id: filmId }).update({ progress, detail: `Rendering: ${stage} (${progress}%)`, updated_at: now() });
       },
     });
+    // The assembly cost was already reserved (and debited) by requestAssembly
+    // before this job was queued. Debiting again here charged every successful
+    // render twice; completion only records the spend against the project.
     await db('film_projects').where({ id: filmId }).update({
-      credits_spent: db.raw('credits_spent + ?', [cost]), progress: 100, detail: 'Film ready', updated_at: now(),
+      credits_spent: db.raw('credits_spent + ?', [cost]),
+      progress: 100, detail: 'Film ready', error: null, assembly_cancel_requested: 0, updated_at: now(),
     });
     await notify(userId, {
       type: 'film_completed', title: 'Your film is ready',
@@ -704,19 +1233,30 @@ export async function processFilmAssemblyJob(payload = {}) {
     }).catch(() => {});
     return { ok: true, ...result };
   } catch (error) {
+    const wasCancelled = error.cancelled || error.code === 'assembly_cancelled' || cancelled;
     await refundCredits(userId, cost, {
       idempotencyKey: `film_assembly_refund:${filmId}:${attempt}`,
-      referenceType: 'film', referenceId: filmId, metadata: { reason: 'assembly_failed' },
+      referenceType: 'film', referenceId: filmId, metadata: { reason: wasCancelled ? 'assembly_cancelled' : 'assembly_failed' },
     });
+    // A cancelled/failed render never overwrites the previous finished cut:
+    // assembly stages its output inside the work directory until it succeeds.
+    const keepExisting = film.final_video_path && fs.existsSync(film.final_video_path);
     await db('film_projects').where({ id: filmId }).update({
-      status: 'failed', stage: 'failed', progress: 0,
-      error: String(error.message).slice(0, 2000), detail: null, updated_at: now(),
+      status: wasCancelled ? (keepExisting ? 'completed' : 'ready') : 'failed',
+      stage: wasCancelled ? 'render' : 'failed',
+      progress: wasCancelled ? 0 : number(film.progress),
+      error: wasCancelled ? null : String(error.message).slice(0, 2000),
+      detail: wasCancelled ? 'Render cancelled — credits refunded' : null,
+      final_video_path: keepExisting ? film.final_video_path : null,
+      assembly_cancel_requested: 0, updated_at: now(),
     });
-    await notify(userId, {
-      type: 'film_failed', title: 'Film assembly failed',
-      body: `${film.title}: ${String(error.message).slice(0, 180)}`, actionUrl: `/films/${filmId}`,
-    }).catch(() => {});
-    return { ok: false, error: String(error.message) };
+    if (!wasCancelled) {
+      await notify(userId, {
+        type: 'film_failed', title: 'Film assembly failed',
+        body: `${film.title}: ${String(error.message).slice(0, 180)}`, actionUrl: `/films/${filmId}`,
+      }).catch(() => {});
+    }
+    return { ok: false, cancelled: Boolean(wasCancelled), error: String(error.message) };
   }
 }
 
@@ -733,6 +1273,8 @@ export async function filmDetail(userId, filmId, role = 'user') {
   let preflight = { ready: false, missing: [], ttsProvider: 'unknown' };
   try { preflight = await assemblyPreflight(filmId); }
   catch (error) { preflight = { ready: false, missing: [], ttsProvider: `unavailable: ${error.message}` }; }
+  const provider = providerStatus(filmSceneProvider(film));
+  const plan = planProject(film.target_duration_seconds);
   return {
     ...filmView(film, summary.get(filmId)),
     scenes: scenes.map(sceneView),
@@ -742,8 +1284,20 @@ export async function filmDetail(userId, filmId, role = 'user') {
     assemblyReady: preflight.ready,
     missingScenes: preflight.missing,
     ttsProvider: preflight.ttsProvider,
+    sfxAssets: preflight.sfxAssets || [],
+    preflight: {
+      durationSeconds: preflight.duration,
+      segments: preflight.segments,
+      estimatedRenderBytes: preflight.estimatedRenderBytes,
+      sfxCount: preflight.sfxCount || 0,
+      unresolvedSfx: preflight.unresolvedSfx || 0,
+      burnInRecommended: preflight.burnInRecommended,
+    },
     limits: filmLimits(),
-    scenePlan: planSceneCount(film.target_duration_seconds),
+    scenePlan: plan.sceneCount,
+    plan,
+    videoProvider: provider,
+    runState: film.run_state || 'idle',
   };
 }
 

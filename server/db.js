@@ -375,6 +375,12 @@ export const tableDefinitions = {
     t.integer('duration_seconds').notNullable().defaultTo(0);
     t.text('error');
     t.text('metadata').notNullable().defaultTo('{}');
+    // Long-form production state (additive; existing rows read as idle/none).
+    t.string('run_state', 30).notNullable().defaultTo('idle');
+    t.string('scene_provider', 60);
+    t.integer('assembly_cancel_requested').notNullable().defaultTo(0);
+    t.string('run_started_at', 40);
+    t.string('run_stopped_at', 40);
     t.string('created_at', 40).notNullable();
     t.string('updated_at', 40).notNullable();
     t.string('completed_at', 40);
@@ -423,6 +429,11 @@ export const tableDefinitions = {
     t.integer('credits_cost').notNullable().defaultTo(0);
     t.integer('attempts').notNullable().defaultTo(0);
     t.text('error');
+    // Continuity + sound design for long-form production (additive).
+    t.text('cast').notNullable().defaultTo('[]');
+    t.text('sfx').notNullable().defaultTo('[]');
+    t.integer('cancel_requested').notNullable().defaultTo(0);
+    t.string('queued_at', 40);
     t.string('created_at', 40).notNullable();
     t.string('updated_at', 40).notNullable();
     t.unique(['film_id', 'ordinal']);
@@ -499,8 +510,26 @@ export async function initializeDatabase(database, options = {}) {
   }
   // The filmmaking tables are new; keep partial/early installs upgradeable.
   const filmColumns = {
-    film_projects: { progress: (t) => t.integer('progress').notNullable().defaultTo(0), detail: (t) => t.text('detail'), reference_image_path: (t) => t.text('reference_image_path'), music_path: (t) => t.text('music_path') },
-    film_scenes: { progress: (t) => t.integer('progress').notNullable().defaultTo(0), detail: (t) => t.text('detail'), provider_handle: (t) => t.text('provider_handle') },
+    film_projects: {
+      progress: (t) => t.integer('progress').notNullable().defaultTo(0),
+      detail: (t) => t.text('detail'),
+      reference_image_path: (t) => t.text('reference_image_path'),
+      music_path: (t) => t.text('music_path'),
+      run_state: (t) => t.string('run_state', 30).notNullable().defaultTo('idle'),
+      scene_provider: (t) => t.string('scene_provider', 60),
+      assembly_cancel_requested: (t) => t.integer('assembly_cancel_requested').notNullable().defaultTo(0),
+      run_started_at: (t) => t.string('run_started_at', 40),
+      run_stopped_at: (t) => t.string('run_stopped_at', 40),
+    },
+    film_scenes: {
+      progress: (t) => t.integer('progress').notNullable().defaultTo(0),
+      detail: (t) => t.text('detail'),
+      provider_handle: (t) => t.text('provider_handle'),
+      cast: (t) => t.text('cast').notNullable().defaultTo('[]'),
+      sfx: (t) => t.text('sfx').notNullable().defaultTo('[]'),
+      cancel_requested: (t) => t.integer('cancel_requested').notNullable().defaultTo(0),
+      queued_at: (t) => t.string('queued_at', 40),
+    },
   };
   for (const [table, columns] of Object.entries(filmColumns)) {
     if (!await database.schema.hasTable(table)) continue;

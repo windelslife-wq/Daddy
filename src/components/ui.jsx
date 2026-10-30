@@ -46,12 +46,16 @@ const statusLabels = {
   awaiting_media: 'Awaiting video', publishing: 'Publishing', processing: 'Processing',
   published: 'Published', skipped: 'Skipped', partial: 'Partial', connected: 'Connected',
   disconnected: 'Disconnected', expired: 'Token expired', active: 'Active', suspended: 'Suspended',
+  ready: 'Ready', assembling: 'Rendering', paused: 'Paused', planned: 'Queued', cancelled: 'Cancelled',
+  idle: 'Idle', running: 'Running', ready_to_assemble: 'Ready to render',
 };
 const statusTones = {
   queued: 'neutral', generating: 'info', completed: 'success', published: 'success', connected: 'success', active: 'success',
   failed: 'danger', expired: 'danger', suspended: 'danger', publishing: 'info', processing: 'info', scheduled: 'info',
   needs_review: 'warning', pending_review: 'warning', awaiting_media: 'warning', partial: 'warning',
   draft: 'neutral', skipped: 'neutral', disconnected: 'neutral',
+  ready: 'success', ready_to_assemble: 'success', assembling: 'info', running: 'info',
+  paused: 'warning', planned: 'neutral', cancelled: 'danger', idle: 'neutral',
 };
 export function StatusBadge({ status, label, className = '' }) {
   const key = String(status || 'unknown').toLowerCase();
