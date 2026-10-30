@@ -1,5 +1,5 @@
 /**
- * Real AI video provider adapters.
+ * Real AI video provider adapters (Google Veo, Replicate, fal.ai).
  *
  * IMPORTANT: this module NEVER produces synthetic video and NEVER reports a
  * successful generation without a real provider response. When no provider is
@@ -12,9 +12,15 @@
  *  - fal        — queue.fal.run queue API, any video model
  *  - veo        — Google Veo predictLongRunning on generativelanguage.googleapis.com
  *
+ * Several providers may be configured at once. `FILM_VIDEO_PROVIDER` is the
+ * server default; a project can store its own `scene_provider` override, which
+ * is validated against this list on the server before any request is made.
+ *
  * Model-specific input key names differ between providers. Override them with
- * FILM_REPLICATE_INPUT_JSON / FILM_FAL_INPUT_JSON (partial JSON merged into the
- * generated input) or change the model env vars. See docs/FILMMAKING.md.
+ * FILM_REPLICATE_INPUT_JSON / FILM_FAL_INPUT_JSON / FILM_VEO_PARAMETERS_JSON
+ * (partial JSON merged into the generated input) or change the model env vars.
+ * Providers only accept a fixed set of clip lengths; FILM_*_DURATIONS lets you
+ * declare the supported values for a custom model.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,14 +29,39 @@ import { Readable, Transform } from 'node:stream';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 
-const REPLICATE_ROOT = process.env.REPLICATE_API_ROOT || 'https://api.replicate.com';
-const FAL_ROOT = process.env.FAL_API_ROOT || 'https://queue.fal.run';
-const VEO_ROOT = process.env.GOOGLE_VEO_API_ROOT || 'https://generativelanguage.googleapis.com';
+const DEFAULT_DURATIONS = {
+  replicate: [5, 10],
+  fal: [5, 10],
+  veo: [4, 6, 8],
+};
+
+const PROVIDER_LABELS = {
+  replicate: 'Replicate (Kling / Wan / Minimax / etc.)',
+  fal: 'fal.ai (Kling / Veo / Wan / etc.)',
+  veo: 'Google Veo (Gemini API)',
+};
+
+const PROVIDER_IDS = ['replicate', 'fal', 'veo'];
+
+function roots() {
+  return {
+    replicate: process.env.REPLICATE_API_ROOT || 'https://api.replicate.com',
+    fal: process.env.FAL_API_ROOT || 'https://queue.fal.run',
+    veo: process.env.GOOGLE_VEO_API_ROOT || 'https://generativelanguage.googleapis.com',
+  };
+}
+
+function providerToken(provider) {
+  if (provider === 'replicate') return config.film.replicateToken;
+  if (provider === 'fal') return config.film.falKey;
+  if (provider === 'veo') return config.film.veoKey;
+  return '';
+}
 
 function redact(text) {
   return String(text || '')
     .replace(/(Bearer|Key)\s+[A-Za-z0-9._-]+/gi, '$1 [redacted]')
-    .replace(/([?&](?:key|api_key|token))=[^&\s]+/gi, '$1=[redacted]')
+    .replace(/([?&](?:key|api_key|token))=[^&\\s]+/gi, '$1=[redacted]')
     .replace(/r8_[A-Za-z0-9_-]{8,}/g, '[redacted]');
 }
 
@@ -54,37 +85,107 @@ async function requestJson(url, options = {}, timeoutMs = 90000) {
   catch { throw new AppError(502, 'video_provider_error', `Provider returned non-JSON: ${redact(text).slice(0, 300)}`); }
 }
 
+/** Declared clip lengths for a provider, configurable per deployment/model. */
+export function durationOptionsFor(provider) {
+  const raw = process.env[`FILM_${String(provider).toUpperCase()}_DURATIONS`];
+  const parsed = String(raw || '')
+    .split(',')
+    .map((value) => Number.parseInt(value.trim(), 10))
+    .filter((value) => Number.isFinite(value) && value > 0 && value <= 60);
+  const options = parsed.length ? [...new Set(parsed)].sort((a, b) => a - b) : (DEFAULT_DURATIONS[provider] || []);
+  return options.length ? options : [config.film.maxSceneSeconds];
+}
+
+/**
+ * Map a requested scene length onto the nearest supported clip length.
+ * The renderer trims or pads each clip to the scene's storyboard duration, so
+ * a 7s beat on a 5/10s model becomes a 10s prediction trimmed back to 7s.
+ */
+export function resolveProviderDuration(provider, seconds) {
+  const options = durationOptionsFor(provider).filter((value) => value <= config.film.maxSceneSeconds);
+  const usable = options.length ? options : [config.film.maxSceneSeconds];
+  const requested = Math.max(1, Number(seconds) || config.film.maxSceneSeconds);
+  return usable.find((value) => value >= requested) ?? usable[usable.length - 1];
+}
+
+/** Machine-readable capability catalogue, safe to expose to the browser. */
+export function providerCatalog() {
+  return PROVIDER_IDS.map((id) => ({
+    id,
+    label: PROVIDER_LABELS[id],
+    configured: Boolean(providerToken(id)),
+    model: id === 'replicate' ? config.film.replicateModel : id === 'fal' ? config.film.falModel : config.film.veoModel,
+    durations: durationOptionsFor(id).filter((value) => value <= config.film.maxSceneSeconds),
+    maxSeconds: Math.max(...durationOptionsFor(id).filter((value) => value <= config.film.maxSceneSeconds), 0) || config.film.maxSceneSeconds,
+    aspectRatios: id === 'veo' ? ['16:9', '9:16'] : ['16:9', '9:16', '1:1'],
+    supportsReferenceImage: true,
+    supportsCancel: id !== 'veo',
+  }));
+}
+
+export function configuredProviders() {
+  return providerCatalog().filter((item) => item.configured).map((item) => item.id);
+}
+
+/**
+ * Choose the provider for a project. An explicit, configured project override
+ * wins; otherwise the server default is used. Unknown or unconfigured choices
+ * fail loudly rather than silently swapping providers.
+ */
+export function resolveVideoProvider(requested) {
+  const chosen = String(requested || '').toLowerCase();
+  if (chosen && chosen !== 'none') {
+    if (!PROVIDER_IDS.includes(chosen)) throw new AppError(400, 'video_provider_unknown', `Unknown video provider "${chosen}".`);
+    if (!providerToken(chosen)) {
+      throw new AppError(503, 'video_provider_unavailable', `The ${chosen} provider is not configured on this server. Add its API key or choose a configured provider.`);
+    }
+    return chosen;
+  }
+  const active = config.film.videoProvider;
+  if (!PROVIDER_IDS.includes(active) || !providerToken(active)) {
+    throw new AppError(503, 'video_provider_unavailable',
+      'Real AI video generation is not configured on this server. An administrator must set FILM_VIDEO_PROVIDER plus REPLICATE_API_TOKEN, FAL_API_KEY, or GOOGLE_VEO_API_KEY. The system will not fabricate a video clip.');
+  }
+  return active;
+}
+
 /** Which provider is active, plus capability/limit info for the UI. */
-export function providerStatus() {
-  const p = config.film.videoProvider;
-  const configured = (p === 'replicate' && !!config.film.replicateToken)
-    || (p === 'fal' && !!config.film.falKey)
-    || (p === 'veo' && !!config.film.veoKey);
+export function providerStatus(requested) {
+  let active = String(requested || config.film.videoProvider || 'none').toLowerCase();
+  if (!PROVIDER_IDS.includes(active)) active = 'none';
+  const configured = Boolean(providerToken(active));
+  const anyConfigured = PROVIDER_IDS.some((id) => providerToken(id));
   return {
-    provider: p,
+    provider: active,
+    active,
     configured,
-    model: p === 'replicate' ? config.film.replicateModel : p === 'fal' ? config.film.falModel : p === 'veo' ? config.film.veoModel : null,
+    anyConfigured,
+    catalog: providerCatalog(),
+    model: active === 'replicate' ? config.film.replicateModel : active === 'fal' ? config.film.falModel : active === 'veo' ? config.film.veoModel : null,
+    durations: PROVIDER_IDS.includes(active) ? durationOptionsFor(active) : [],
     maxSceneSeconds: config.film.maxSceneSeconds,
     supportsReferenceImage: configured,
-    supportsLipSync: p === 'veo',
+    supportsLipSync: active === 'veo',
+    supportsCancel: active !== 'none' && active !== 'veo',
     realGeneration: configured,
     message: configured
-      ? `${p} is configured. Scene videos will be generated by the real provider.`
-      : 'No AI video provider is configured. Set FILM_VIDEO_PROVIDER and its API key on the server. Scenes can be written and assembled, but clips will NOT be fabricated.',
+      ? `${active} is configured. Scene videos will be generated by the real provider.`
+      : anyConfigured
+        ? `Real generation is available through: ${configuredProviders().join(', ')}. Select one for this project.`
+        : 'No AI video provider is configured. Set FILM_VIDEO_PROVIDER and its API key on the server. Scenes can be written and assembled, but clips will NOT be fabricated.',
     providers: [
-      { id: 'none', label: 'None (screenplay + editing only)', configured: p === 'none' },
-      { id: 'replicate', label: 'Replicate (Kling / Wan / Minimax / etc.)', configured: p === 'replicate' && !!config.film.replicateToken },
-      { id: 'fal', label: 'Fal.ai (Kling / Veo / Wan / etc.)', configured: p === 'fal' && !!config.film.falKey },
-      { id: 'veo', label: 'Google Veo (Gemini API)', configured: p === 'veo' && !!config.film.veoKey },
+      { id: 'none', label: 'None (screenplay + editing only)', configured: !anyConfigured },
+      ...providerCatalog().map((item) => ({ id: item.id, label: item.label, configured: item.configured })),
     ],
   };
 }
 
-export function requireVideoProvider() {
-  const status = providerStatus();
+export function requireVideoProvider(requested) {
+  const provider = resolveVideoProvider(requested);
+  const status = providerStatus(provider);
   if (!status.configured) {
     throw new AppError(503, 'video_provider_unavailable',
-      'Real AI video generation is not configured on this server. An administrator must set FILM_VIDEO_PROVIDER plus REPLICATE_API_TOKEN, FAL_API_KEY, or GOOGLE_VEO_API_KEY. The system will not fabricate a video clip.');
+      `No real AI video provider is configured. Set FILM_VIDEO_PROVIDER plus REPLICATE_API_TOKEN, FAL_API_KEY, or GOOGLE_VEO_API_KEY. The system will not fabricate a video clip.`);
   }
   return status;
 }
@@ -113,14 +214,15 @@ function safeProviderId(value) {
 // --- Replicate -------------------------------------------------------------
 async function replicateStart({ prompt, imageBuffer, imageMime, seconds, aspectRatio }) {
   const model = safeProviderId(config.film.replicateModel);
+  const duration = resolveProviderDuration('replicate', seconds);
   const input = mergeInputOverride(process.env.FILM_REPLICATE_INPUT_JSON, {
     prompt,
     ...(imageBuffer ? { [process.env.FILM_REPLICATE_IMAGE_KEY || 'start_image']: imageDataUri(imageBuffer, imageMime) } : {}),
-    duration: seconds >= 8 ? 10 : 5,
+    duration,
     aspect_ratio: aspectRatio,
     ...(process.env.FILM_REPLICATE_NEGATIVE_PROMPT ? { negative_prompt: process.env.FILM_REPLICATE_NEGATIVE_PROMPT } : {}),
   });
-  const data = await requestJson(`${REPLICATE_ROOT}/v1/models/${model}/predictions`, {
+  const data = await requestJson(`${roots().replicate}/v1/models/${model}/predictions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${config.film.replicateToken}`, prefer: 'wait=60' },
     body: JSON.stringify({ input }),
@@ -130,11 +232,13 @@ async function replicateStart({ prompt, imageBuffer, imageMime, seconds, aspectR
   return {
     provider: 'replicate', providerJobId: data.id,
     pollRef: `/v1/predictions/${encodeURIComponent(data.id)}`,
+    requestedSeconds: Number(seconds),
+    providerSeconds: duration,
   };
 }
 
 async function replicatePoll(handle) {
-  const data = await requestJson(`${REPLICATE_ROOT}${handle.pollRef}`, {
+  const data = await requestJson(`${roots().replicate}${handle.pollRef}`, {
     headers: { authorization: `Bearer ${config.film.replicateToken}` }, providerName: 'Replicate',
   }, 60000);
   const status = String(data.status || '').toLowerCase();
@@ -153,13 +257,14 @@ async function replicatePoll(handle) {
 // --- Fal.ai ----------------------------------------------------------------
 async function falStart({ prompt, imageBuffer, imageMime, seconds, aspectRatio }) {
   const model = safeProviderId(config.film.falModel);
+  const duration = resolveProviderDuration('fal', seconds);
   const input = mergeInputOverride(process.env.FILM_FAL_INPUT_JSON, {
     prompt,
     ...(imageBuffer ? { [process.env.FILM_FAL_IMAGE_KEY || 'image_url']: imageDataUri(imageBuffer, imageMime) } : {}),
-    duration: seconds >= 8 ? '10' : '5',
+    duration: String(duration),
     aspect_ratio: aspectRatio,
   });
-  const data = await requestJson(`${FAL_ROOT}/${model}`, {
+  const data = await requestJson(`${roots().fal}/${model}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Key ${config.film.falKey}` },
     body: JSON.stringify(input),
@@ -168,7 +273,7 @@ async function falStart({ prompt, imageBuffer, imageMime, seconds, aspectRatio }
   if (!data?.request_id || !data?.status_url || !data?.response_url) {
     throw new AppError(502, 'video_provider_error', 'Fal.ai did not return queue URLs. Check the model id and FAL_API_KEY.');
   }
-  return { provider: 'fal', providerJobId: data.request_id, pollRef: data.status_url, resultRef: data.response_url };
+  return { provider: 'fal', providerJobId: data.request_id, pollRef: data.status_url, resultRef: data.response_url, requestedSeconds: Number(seconds), providerSeconds: duration };
 }
 
 async function falPoll(handle) {
@@ -194,17 +299,18 @@ async function falPoll(handle) {
 // --- Google Veo ------------------------------------------------------------
 function veoUrl(suffix) {
   const key = encodeURIComponent(config.film.veoKey);
-  return `${VEO_ROOT}/v1beta/${suffix}${suffix.includes('?') ? '&' : '?'}key=${key}`;
+  return `${roots().veo}/v1beta/${suffix}${suffix.includes('?') ? '&' : '?'}key=${key}`;
 }
 
 async function veoStart({ prompt, imageBuffer, imageMime, seconds, aspectRatio }) {
   const model = safeProviderId(config.film.veoModel);
+  const duration = resolveProviderDuration('veo', seconds);
   const instance = { prompt };
   if (imageBuffer) instance.image = { bytesBase64Encoded: imageBuffer.toString('base64'), mimeType: imageMime || 'image/png' };
   const parameters = mergeInputOverride(process.env.FILM_VEO_PARAMETERS_JSON, {
     aspectRatio: aspectRatio === '9:16' ? '9:16' : aspectRatio === '1:1' ? '1:1' : '16:9',
     sampleCount: 1,
-    durationSeconds: seconds >= 8 ? 8 : 4,
+    durationSeconds: duration,
     personGeneration: 'allow_adult',
   });
   const data = await requestJson(veoUrl(`models/${model}:predictLongRunning`), {
@@ -213,7 +319,7 @@ async function veoStart({ prompt, imageBuffer, imageMime, seconds, aspectRatio }
     providerName: 'Google Veo',
   }, 120000);
   if (!data?.name) throw new AppError(502, 'video_provider_error', `Google Veo did not return an operation name: ${redact(JSON.stringify(data)).slice(0, 300)}`);
-  return { provider: 'veo', providerJobId: data.name, pollRef: data.name.replace(/^\//, '') };
+  return { provider: 'veo', providerJobId: data.name, pollRef: data.name.replace(/^\//, ''), requestedSeconds: Number(seconds), providerSeconds: duration };
 }
 
 async function veoPoll(handle) {
@@ -234,10 +340,9 @@ async function veoPoll(handle) {
  * Start a real provider prediction. Returns an opaque handle that is persisted
  * with the scene so a worker restart can resume polling.
  */
-export async function startVideoGeneration({ prompt, referenceImagePath, seconds, aspectRatio = '9:16' }) {
-  requireVideoProvider();
-  const provider = config.film.videoProvider;
-  const duration = Math.max(4, Math.min(config.film.maxSceneSeconds, Number(seconds) || config.film.maxSceneSeconds));
+export async function startVideoGeneration({ prompt, referenceImagePath, seconds, aspectRatio = '9:16', provider: requestedProvider }) {
+  const provider = resolveVideoProvider(requestedProvider);
+  const duration = Math.max(1, Math.min(config.film.maxSceneSeconds, Number(seconds) || config.film.maxSceneSeconds));
   let imageBuffer = null; let imageMime = null;
   if (referenceImagePath) {
     const abs = path.resolve(referenceImagePath);
@@ -259,11 +364,42 @@ export async function startVideoGeneration({ prompt, referenceImagePath, seconds
 /** Poll a persisted handle. Never fabricates completion. */
 export async function pollVideoGeneration(handle) {
   if (!handle?.provider || !handle?.pollRef) throw new AppError(500, 'video_handle_invalid', 'Stored provider handle is invalid; regenerate this scene.');
-  requireVideoProvider();
+  requireVideoProvider(handle.provider);
   if (handle.provider === 'replicate') return replicatePoll(handle);
   if (handle.provider === 'fal') return falPoll(handle);
   if (handle.provider === 'veo') return veoPoll(handle);
   throw new AppError(500, 'video_provider_unknown', `Unknown provider in stored handle: ${handle.provider}`);
+}
+
+/**
+ * Best-effort cancellation of a provider job. Veo has no cancel operation, so
+ * it reports `supported: false` instead of pretending the job stopped. Credits
+ * are refunded locally either way, and a late provider result is never attached
+ * to a cancelled scene.
+ */
+export async function cancelVideoGeneration(handle) {
+  if (!handle?.provider) return { cancelled: false, supported: false, reason: 'No provider job to cancel.' };
+  const token = providerToken(handle.provider);
+  if (!token) return { cancelled: false, supported: false, reason: 'Provider is not configured.' };
+  try {
+    if (handle.provider === 'replicate') {
+      await requestJson(`${roots().replicate}/v1/predictions/${encodeURIComponent(handle.providerJobId)}/cancel`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}` }, providerName: 'Replicate',
+      }, 30000);
+      return { cancelled: true, supported: true };
+    }
+    if (handle.provider === 'fal') {
+      const base = String(handle.pollRef || '').replace(/\/status\/?$/, '');
+      if (!base) return { cancelled: false, supported: true, reason: 'Missing fal queue reference.' };
+      await requestJson(`${base}/cancel`, {
+        method: 'PUT', headers: { authorization: `Key ${token}` }, providerName: 'Fal.ai',
+      }, 30000);
+      return { cancelled: true, supported: true };
+    }
+    return { cancelled: false, supported: false, reason: `${handle.provider} does not expose a cancellation endpoint. The job will finish at the provider but its result is discarded.` };
+  } catch (error) {
+    return { cancelled: false, supported: handle.provider !== 'veo', reason: redact(error.message).slice(0, 400) };
+  }
 }
 
 /** Download a provider video to disk with a hard size cap. */

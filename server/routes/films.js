@@ -12,10 +12,11 @@ import { db, now, json, parseJson, number } from '../db.js';
 import { config } from '../config.js';
 import { requireAuth } from '../auth.js';
 import { asyncHandler, badRequest, notFound, forbidden, AppError } from '../errors.js';
-import { contentType, projectDir } from '../media/utils.js';
+import { contentType, projectDir, probeVideo } from '../media/utils.js';
 import {
   FILM_TYPES, FILM_GENRES, FILM_STYLES, FILM_ASPECTS, FILM_PLATFORMS,
-  generateScreenplay, filmLimits, planSceneCount, normaliseEditedScreenplay,
+  generateScreenplay, filmLimits, planSceneCount, planProject,
+  normaliseEditedScreenplay, assertScenePlanFits, MAX_REQUESTABLE_SECONDS,
 } from '../film/screenplay.js';
 import { providerStatus } from '../film/videoProviders.js';
 import { estimateFilm, estimateFromScreenplay, getBalance, creditHistory } from '../film/credits.js';
@@ -25,7 +26,9 @@ import {
   listScenes, updateScene, addScene, deleteScene, reorderScenes,
   listCharacters, upsertCharacter, deleteCharacter,
   requestSceneGeneration, requestAllScenes, requestAssembly, publishFilm,
-  ownedFilm,
+  ownedFilm, queueFilmScenes, pauseFilmGeneration, resumeFilmGeneration,
+  cancelFilmGeneration, cancelSceneGeneration, retryFailedScenes, filmProgress,
+  cancelFilmAssembly, addSfxAsset, deleteSfxAsset, sfxAssetList, validateSceneProvider,
 } from '../film/scenes.js';
 import { assemblyPreflight } from '../film/assembly.js';
 import {
@@ -57,7 +60,9 @@ const screenplayRequestSchema = z.object({
   style: z.string().max(60).optional().default('cinematic'),
   aspectRatio: z.enum(FILM_ASPECTS).optional().default('9:16'),
   platform: z.string().max(40).optional().default('tiktok'),
-  targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional().default(60),
+  // No default: an omitted duration must inherit the project's own runtime,
+  // never force a 60-second cut onto a long-form film.
+  targetDurationSeconds: z.number().int().min(5).max(MAX_REQUESTABLE_SECONDS).optional(),
   storyBible: z.record(z.any()).optional().default({}),
   characters: z.array(z.any()).max(20).optional().default([]),
   previousEpisodes: z.array(z.any()).max(30).optional().default([]),
@@ -70,13 +75,14 @@ const estimateSchema = z.object({
     dialogue: z.array(z.object({ line: z.string().max(1000) })).max(20).optional().default([]),
   })).max(config.film.maxScenes).optional(),
   screenplay: z.any().optional(),
-  targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional(),
+  targetDurationSeconds: z.number().int().min(5).max(MAX_REQUESTABLE_SECONDS).optional(),
   assembly: z.boolean().optional().default(true),
 });
 
 const uploadKindSchema = z.object({
-  kind: z.enum(['reference', 'music', 'character']),
+  kind: z.enum(['reference', 'music', 'character', 'sfx']),
   characterId: z.string().max(48).optional(),
+  name: z.string().max(120).optional(),
 });
 
 async function streamFile(req, res, filePath, filename, { download = false } = {}) {
@@ -112,12 +118,25 @@ export function filmRouter() {
   // ---- Static configuration / discovery -----------------------------------
   router.get('/config', h(async (req, res) => {
     const [balance, provider] = await Promise.all([getBalance(req.user.id), Promise.resolve(providerStatus())]);
+    const limits = filmLimits();
     res.json({
       types: FILM_TYPES, genres: FILM_GENRES, styles: FILM_STYLES,
       aspectRatios: FILM_ASPECTS, platforms: FILM_PLATFORMS,
       languages: ['en', 'es', 'fr', 'de', 'pt', 'it', 'nl', 'pl', 'tr', 'zh', 'ha', 'yo', 'ig', 'sw', 'ar', 'hi'],
       voices: ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer', 'sage', 'eleven-default'],
-      limits: filmLimits(),
+      limits,
+      // Long-form duration presets (seconds). Any value between min and max is
+      // accepted; these are the shortcuts the studio offers.
+      durationPresets: [60, 120, 300, 600, 900, 1200, 1800, 2400, 3000, 3600]
+        .filter((seconds) => seconds <= limits.maxProjectSeconds),
+      sceneDurationOptions: Array.from({ length: Math.max(0, limits.maxSceneSeconds - limits.minSceneSeconds + 1) }, (_, i) => limits.minSceneSeconds + i),
+      production: {
+        sceneConcurrency: limits.sceneConcurrency,
+        assemblySegmentScenes: limits.assemblySegmentScenes,
+        burnInMaxSeconds: limits.burnInMaxSeconds,
+        sfxEnabled: limits.sfxEnabled,
+        maxProducibleMinutes: Math.floor(limits.maxProducibleSeconds / 60),
+      },
       credits: {
         balance,
         perVideoSecond: config.film.creditPerVideoSecond,
@@ -136,13 +155,18 @@ export function filmRouter() {
     let scenes = data.scenes;
     if (!scenes && data.screenplay) scenes = data.screenplay.scenes || [];
     if (!scenes && data.targetDurationSeconds) {
-      const count = planSceneCount(data.targetDurationSeconds);
-      scenes = Array.from({ length: count }, () => ({ duration_seconds: config.film.maxSceneSeconds, dialogue: [] }));
+      const plan = assertScenePlanFits(data.targetDurationSeconds);
+      scenes = Array.from({ length: plan.sceneCount }, () => ({ duration_seconds: plan.sceneSeconds, dialogue: [] }));
     }
     if (!scenes) throw badRequest('Provide scenes, a screenplay, or targetDurationSeconds.');
     const estimate = estimateFilm(scenes, { assembly: data.assembly });
     const balance = await getBalance(req.user.id);
-    res.json({ ...estimate, balance, sufficient: balance >= estimate.total, shortfall: Math.max(0, estimate.total - balance) });
+    const plan = data.targetDurationSeconds ? planProject(data.targetDurationSeconds) : null;
+    res.json({
+      ...estimate, balance, plan,
+      sufficient: balance >= estimate.total,
+      shortfall: Math.max(0, estimate.total - balance),
+    });
   }));
 
   // Standalone AI Script Writer (no project needed).
@@ -228,7 +252,7 @@ export function filmRouter() {
   router.post('/series/:seriesId/episodes/:episodeId/screenplay', h(async (req, res) => {
     const options = z.object({
       idea: z.string().max(4000).optional(),
-      targetDurationSeconds: z.number().int().min(5).max(config.film.maxProjectSeconds).optional(),
+      targetDurationSeconds: z.number().int().min(5).max(MAX_REQUESTABLE_SECONDS).optional(),
       allowTemplate: z.boolean().optional().default(true),
     }).parse(req.body || {});
     res.json(await generateEpisodeScreenplay(req.user.id, req.params.seriesId, req.params.episodeId, options, req.user.role));
@@ -271,7 +295,7 @@ export function filmRouter() {
       style: data.style || film.style,
       aspectRatio: film.aspect_ratio,
       platform: film.target_platform,
-      targetDurationSeconds: data.targetDurationSeconds || film.target_duration_seconds,
+      targetDurationSeconds: data.targetDurationSeconds ?? film.target_duration_seconds,
       storyBible: Object.keys(data.storyBible || {}).length ? data.storyBible : parseJson(film.story_bible, {}),
       characters: data.characters?.length ? data.characters : await listCharacters(req.user.id, { filmId: film.id, seriesId: film.series_id || undefined }),
     });
@@ -300,7 +324,52 @@ export function filmRouter() {
   }));
 
   router.post('/:id/scenes/generate-all', h(async (req, res) => {
+    const data = z.object({ sceneIds: z.array(z.string().min(1)).max(config.film.maxScenes).optional() }).parse(req.body || {});
+    if (data.sceneIds?.length) {
+      res.json(await queueFilmScenes(req.user.id, req.params.id, { sceneIds: data.sceneIds, role: req.user.role }));
+      return;
+    }
     res.json(await requestAllScenes(req.user.id, req.params.id, req.user.role));
+  }));
+
+  // ---- Generation run controls (long-form production) ----------------------
+  router.post('/:id/generation/start', h(async (req, res) => {
+    const data = z.object({ sceneIds: z.array(z.string().min(1)).max(config.film.maxScenes).optional() }).parse(req.body || {});
+    res.status(202).json(await queueFilmScenes(req.user.id, req.params.id, { sceneIds: data.sceneIds || null, role: req.user.role }));
+  }));
+
+  router.post('/:id/generation/pause', h(async (req, res) => {
+    res.json(await pauseFilmGeneration(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/generation/resume', h(async (req, res) => {
+    res.json(await resumeFilmGeneration(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/generation/cancel', h(async (req, res) => {
+    res.json(await cancelFilmGeneration(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/scenes/retry-failed', h(async (req, res) => {
+    res.status(202).json(await retryFailedScenes(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/cancel', h(async (req, res) => {
+    res.json(await cancelSceneGeneration(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.get('/:id/progress', h(async (req, res) => {
+    res.json(await filmProgress(req.user.id, req.params.id, req.user.role));
+  }));
+
+  // ---- Sound effects -------------------------------------------------------
+  router.get('/:id/sfx', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json({ assets: await sfxAssetList(req.params.id) });
+  }));
+
+  router.delete('/:id/sfx/:assetId', h(async (req, res) => {
+    res.json(await deleteSfxAsset(req.user.id, req.params.id, req.params.assetId, req.user.role));
   }));
 
   router.get('/:id/preflight', h(async (req, res) => {
@@ -311,6 +380,13 @@ export function filmRouter() {
     res.json({
       sceneCount: pre.sceneCount, durationSeconds: pre.duration,
       missing: pre.missing, ready: pre.ready, ttsProvider: pre.ttsProvider,
+      segments: pre.segments,
+      estimatedRenderBytes: pre.estimatedRenderBytes,
+      burnInRecommended: pre.burnInRecommended,
+      burnInMaxSeconds: config.film.burnInMaxSeconds,
+      sfxCount: pre.sfxCount,
+      unresolvedSfx: pre.unresolvedSfx,
+      dialogueCharacters: pre.dialogueCharacters,
       assemblyCredits: cost.total + config.film.creditPerAssembly,
       balance: await getBalance(req.user.id),
     });
@@ -344,8 +420,15 @@ export function filmRouter() {
 
   // ---- Assembly / export ---------------------------------------------------
   router.post('/:id/assemble', h(async (req, res) => {
-    const data = z.object({ subtitles: z.boolean().optional().default(true) }).parse(req.body || {});
+    const data = z.object({
+      subtitles: z.boolean().optional(),
+      burnSubtitles: z.boolean().optional(),
+    }).parse(req.body || {});
     res.status(202).json(await requestAssembly(req.user.id, req.params.id, data, req.user.role));
+  }));
+
+  router.post('/:id/assembly/cancel', h(async (req, res) => {
+    res.json(await cancelFilmAssembly(req.user.id, req.params.id, req.user.role));
   }));
 
   router.get('/:id/media/:asset', h(async (req, res) => {
@@ -379,17 +462,33 @@ export function filmRouter() {
     if (!req.file) throw badRequest('Choose a file to upload.');
     const isImage = ['image/png', 'image/jpeg', 'image/webp'].includes(req.file.mimetype);
     const isAudio = ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/ogg', 'audio/webm'].includes(req.file.mimetype);
-    if (data.kind !== 'music' && !isImage) throw badRequest('Reference and character images must be PNG, JPEG, or WebP.');
-    if (data.kind === 'music' && !isAudio) throw badRequest('Music must be MP3, WAV, M4A, OGG, or WebM audio.');
-    if (data.kind !== 'music' && req.file.size > config.film.maxReferenceImageMb * 1024 * 1024) {
+    const audioKind = data.kind === 'music' || data.kind === 'sfx';
+    if (!audioKind && !isImage) throw badRequest('Reference and character images must be PNG, JPEG, or WebP.');
+    if (audioKind && !isAudio) throw badRequest('Audio must be MP3, WAV, M4A, OGG, or WebM.');
+    if (!audioKind && req.file.size > config.film.maxReferenceImageMb * 1024 * 1024) {
       throw badRequest(`Images must be under ${config.film.maxReferenceImageMb} MB.`);
     }
+    if (audioKind && req.file.size > 25 * 1024 * 1024) throw badRequest('Audio files must be under 25 MB.');
+    if (data.kind === 'sfx' && !config.film.sfxEnabled) throw badRequest('Sound effects are disabled on this server.');
     const dir = path.join(projectDir(`film_${film.id}`), 'assets');
     await fsp.mkdir(dir, { recursive: true });
-    const ext = data.kind === 'music' ? (req.file.mimetype.includes('wav') ? 'wav' : 'mp3') : (req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg');
+    const ext = audioKind ? (req.file.mimetype.includes('wav') ? 'wav' : req.file.mimetype.includes('ogg') ? 'ogg' : req.file.mimetype.includes('mp4') ? 'm4a' : req.file.mimetype.includes('webm') ? 'webm' : 'mp3') : (req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg');
     const filename = `${data.kind}-${Date.now()}.${ext}`;
     const destination = path.join(dir, filename);
     await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    if (data.kind === 'sfx') {
+      const probe = await probeVideo(destination);
+      if (!probe.durationSeconds) {
+        await fsp.rm(destination, { force: true }).catch(() => {});
+        throw badRequest('That audio file could not be decoded. Upload a valid MP3, WAV, M4A, OGG or WebM clip.');
+      }
+      const asset = await addSfxAsset(req.user.id, film.id, {
+        name: data.name || path.basename(req.file.originalname || 'Sound effect'),
+        path: destination, durationSeconds: probe.durationSeconds, bytes: req.file.size,
+      }, req.user.role);
+      res.status(201).json({ uploaded: true, kind: 'sfx', asset });
+      return;
+    }
     if (data.kind === 'reference') {
       await db('film_projects').where({ id: film.id }).update({ reference_image_path: destination, updated_at: now() });
     } else if (data.kind === 'music') {

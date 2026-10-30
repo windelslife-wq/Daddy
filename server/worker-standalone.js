@@ -9,7 +9,7 @@
  *
  *   WORKER_ENABLED=true DATABASE_URL=postgresql://… node server/worker-standalone.js
  */
-import { initializeDatabase, closeDb, logger } from './db.js';
+import { initDb, closeDb, logger } from './db.js';
 import { config } from './config.js';
 import { startWorker, stopWorker } from './worker.js';
 
@@ -18,7 +18,7 @@ if (!config.worker.enabled) {
   process.exit(1);
 }
 
-await initializeDatabase();
+await initDb();
 startWorker();
 logger.info({
   database: config.databaseUrl ? 'postgresql' : 'sqlite',

@@ -62,7 +62,9 @@ export const config = {
   adminPassword: env('ADMIN_PASSWORD', isProduction ? '' : 'AdminStudio2026!'),
   worker: {
     enabled: envBool('WORKER_ENABLED', true),
-    concurrency: envInt('WORKER_CONCURRENCY', 2),
+    // Long-form scene polling is I/O bound (HTTP polls), so a handful of
+    // concurrent jobs is normal. Keep FILM_SCENE_CONCURRENCY below this value.
+    concurrency: envInt('WORKER_CONCURRENCY', 6),
     pollMs: envInt('WORKER_POLL_MS', 1000),
     maxAttempts: envInt('WORKER_MAX_ATTEMPTS', 5),
     jobTimeoutMs: envInt('JOB_TIMEOUT_MS', 20 * 60 * 1000),
@@ -143,9 +145,29 @@ export const config = {
     falModel: env('FILM_FAL_VIDEO_MODEL', 'fal-ai/kling-video/v2.1/master/image-to-video'),
     veoKey: env('GOOGLE_VEO_API_KEY') || env('GEMINI_API_KEY'),
     veoModel: env('FILM_VEO_MODEL', 'veo-3.0-generate-001'),
+    // One clip = one provider prediction. Both the clip length ceiling and the
+    // number of clips per film are configurable so long-form production can be
+    // scaled without touching code.
     maxSceneSeconds: envInt('FILM_MAX_SCENE_SECONDS', 10),
-    maxScenes: envInt('FILM_MAX_SCENES', 120),
+    minSceneSeconds: envInt('FILM_MIN_SCENE_SECONDS', 4),
+    // 720 scenes × 10s covers a 60-minute film (360 clips) with headroom for a
+    // 2-hour cut. Raise together with FILM_MAX_PROJECT_SECONDS for longer films.
+    maxScenes: envInt('FILM_MAX_SCENES', 720),
     maxProjectSeconds: envInt('FILM_MAX_PROJECT_SECONDS', 3600),
+    minProjectSeconds: envInt('FILM_MIN_PROJECT_SECONDS', 5),
+    // How many scene jobs may run in flight for one film. Kept below worker
+    // concurrency so assembly and other jobs always have a free slot.
+    sceneConcurrency: envInt('FILM_SCENE_CONCURRENCY', 4),
+    screenplayChunkScenes: envInt('FILM_SCREENPLAY_CHUNK_SCENES', 25),
+    // Long films are rendered in segments then concatenated without re-encoding
+    // the whole timeline, which keeps memory and temp disk bounded.
+    assemblySegmentScenes: envInt('FILM_ASSEMBLY_SEGMENT_SCENES', 24),
+    maxRenderWidth: envInt('FILM_MAX_RENDER_WIDTH', 1280),
+    // Burning subtitles into the picture needs a full re-encode. Above this
+    // length the renderer writes a soft subtitle track + .srt instead.
+    burnInMaxSeconds: envInt('FILM_BURN_IN_MAX_SECONDS', 900),
+    assemblyTimeoutMs: envInt('FILM_ASSEMBLY_TIMEOUT_MS', 4 * 60 * 60 * 1000),
+    sfxEnabled: envBool('FILM_SFX_ENABLED', true),
     maxReferenceImageMb: envInt('FILM_MAX_REFERENCE_IMAGE_MB', 10),
     pollIntervalMs: envInt('FILM_POLL_INTERVAL_MS', 5000),
     pollTimeoutMs: envInt('FILM_POLL_TIMEOUT_MS', 15 * 60 * 1000),

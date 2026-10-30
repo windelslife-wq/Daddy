@@ -17,6 +17,8 @@
     "test:e2e": "node tests/e2e.js",
     "test:visual": "npm run build && node --test tests/visual.js",
     "doctor": "node scripts/doctor.js",
+    "verify:provider": "node scripts/verify-provider.mjs",
+    "verify:film": "node scripts/verify-film.mjs",
     "setup": "node scripts/setup.js",
     "setup:runbooks": "node scripts/setup.js --runbooks",
     "test:all": "npm test && npm run test:e2e && npm run test:visual",

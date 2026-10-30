@@ -8,7 +8,7 @@ import { generateRecommendations } from './services/analytics.js';
 import { tickScheduler } from './services/scheduler.js';
 import { createAutopilotProject } from './services/projects.js';
 import { generateAutopilotTopic } from './ai.js';
-import { processFilmSceneJob, processFilmAssemblyJob } from './film/scenes.js';
+import { processFilmSceneJob, processFilmAssemblyJob, dispatchPlannedScenes, sweepFilmGenerations, handleSceneJobFailure } from './film/scenes.js';
 
 const workerId = `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 let interval = null;
@@ -25,16 +25,48 @@ function isRetryable(error, job, handled = null) {
   return job.attempts < job.max_attempts;
 }
 
+/**
+ * Is the process that owns a job lock still alive? Locks are written as
+ * `hostname:pid:random`. A lock from another host cannot be checked here, so it
+ * is treated as alive and left to the JOB_TIMEOUT_MS fallback.
+ */
+function lockOwnerAlive(lockedBy) {
+  const [host, pidText] = String(lockedBy || '').split(':');
+  if (!host || host !== os.hostname()) return true;
+  const pid = Number(pidText);
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+
+/**
+ * Recover jobs a worker can no longer finish: the lock holder process is gone
+ * (crash, OOM kill, `kill -9`, container restart) or the lock aged past
+ * JOB_TIMEOUT_MS. Without the first check a restarted worker would leave the
+ * job "running" for up to 20 minutes, and a film scene would sit in
+ * "processing" with nobody polling the provider handle it already persisted.
+ */
 async function recoverStaleJobs() {
   const staleBefore = new Date(Date.now() - config.worker.jobTimeoutMs).toISOString();
-  const stale = await db('jobs').where({ status: 'running' }).where('locked_at', '<', staleBefore);
-  for (const job of stale) {
+  const running = await db('jobs').where({ status: 'running' });
+  for (const job of running) {
+    const abandoned = Boolean(job.locked_by) && !lockOwnerAlive(job.locked_by);
+    const timedOut = Boolean(job.locked_at) && job.locked_at < staleBefore;
+    if (!abandoned && !timedOut) continue;
+    const reason = abandoned ? 'Requeued: the worker process holding it exited.' : 'Recovered after worker timeout.';
+    const payload = parseJson(job.payload, {});
     if (job.attempts >= job.max_attempts) {
-      await db('jobs').where({ id: job.id }).update({ status: 'failed', locked_at: null, last_error: 'Job exceeded its timeout.', completed_at: now(), updated_at: now() });
+      await db('jobs').where({ id: job.id }).update({ status: 'failed', locked_at: null, locked_by: null, last_error: abandoned ? 'The worker process exited before this job finished.' : 'Job exceeded its timeout.', completed_at: now(), updated_at: now() });
+      // A scene whose last attempt died with its worker must be failed and
+      // refunded, never left "processing" with no job watching it.
+      if (job.type === 'film_generate_scene') {
+        await handleSceneJobFailure(payload, new Error(abandoned ? 'The worker process exited before this job finished.' : 'The scene job exceeded its timeout.')).catch((error) => logger.error({ error: error.message, jobId: job.id }, 'Unable to record scene job failure'));
+      }
     } else {
-      await db('jobs').where({ id: job.id }).update({ status: 'queued', run_at: now(), locked_at: null, last_error: 'Recovered after worker timeout.', updated_at: now() });
+      await db('jobs').where({ id: job.id }).update({ status: 'queued', run_at: now(), locked_at: null, locked_by: null, last_error: reason, updated_at: now() });
     }
-    logger.warn({ jobId: job.id, type: job.type, attempts: job.attempts }, 'Recovered stale job');
+    logger.warn({ jobId: job.id, type: job.type, attempts: job.attempts, abandoned, timedOut }, 'Recovered interrupted job');
   }
   const stalePublications = await db('publications').where({ status: 'publishing' }).where('updated_at', '<', staleBefore);
   for (const publication of stalePublications) {
@@ -94,6 +126,7 @@ async function failJob(job, error, handled = null) {
     });
   }
   logger.error({ jobId: job.id, type: job.type, attempts: job.attempts, retryable, error: message }, 'Job failed');
+  return { retryable };
 }
 
 async function cleanupJob() {
@@ -125,6 +158,8 @@ async function processJob(job) {
       return processFilmSceneJob(payload);
     case 'film_assemble':
       return processFilmAssemblyJob(payload);
+    case 'film_dispatch_scenes':
+      return dispatchPlannedScenes(payload.filmId);
     case 'autopilot_generate': {
       const niche = await db('niches').where({ id: payload.nicheId }).first();
       const topic = niche ? await generateAutopilotTopic({ ...niche, config: parseJson(niche.config, {}) }) : null;
@@ -144,6 +179,14 @@ async function processJob(job) {
 
 async function handleJob(job) {
   const payload = parseJson(job.payload, {});
+  // Long film renders and provider polling can outlive the stale-job timeout.
+  // A heartbeat keeps the lock fresh so another worker never re-claims live work.
+  const heartbeat = setInterval(() => {
+    db('jobs').where({ id: job.id, status: 'running' })
+      .update({ locked_at: now() })
+      .catch((error) => logger.warn({ error: error.message, jobId: job.id }, 'Job heartbeat failed'));
+  }, 20000);
+  heartbeat.unref?.();
   try {
     const result = await processJob(job);
     await completeJob(job, result && typeof result === 'object' ? { ok: true, keys: Object.keys(result).slice(0, 8) } : result);
@@ -153,14 +196,28 @@ async function handleJob(job) {
       try { handled = await markPublicationFailure(payload.publicationId, error, job.attempts, job.max_attempts); }
       catch (markError) { logger.error({ markError: markError.message, jobId: job.id }, 'Unable to record publication failure'); }
     }
-    await failJob(job, error, handled);
+    const outcome = await failJob(job, error, handled);
+    if (job.type === 'film_generate_scene' && !outcome?.retryable) {
+      try { await handleSceneJobFailure(payload, error); }
+      catch (markError) { logger.error({ markError: markError.message, jobId: job.id }, 'Unable to record scene job failure'); }
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 }
+
+let lastFilmSweep = 0;
 
 async function tick() {
   if (stopped) return;
   try {
     await recoverStaleJobs();
+    // Keep queued scenes moving without depending on a completion event (e.g.
+    // after a worker restart while a film still has planned scenes).
+    if (Date.now() - lastFilmSweep > 5000) {
+      lastFilmSweep = Date.now();
+      sweepFilmGenerations().catch((error) => logger.warn({ error: error.message }, 'Film generation sweep failed'));
+    }
     const available = Math.max(0, config.worker.concurrency - running);
     if (available > 0) {
       const jobs = await claimJobs(available);

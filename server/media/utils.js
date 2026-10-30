@@ -159,3 +159,103 @@ export function contentType(filename) {
     '.wav': 'audio/wav', '.mp3': 'audio/mpeg',
   }[ext] || 'application/octet-stream';
 }
+
+/**
+ * Inspect a downloaded provider clip before it is accepted as real footage.
+ *
+ * Returns structured facts parsed from FFmpeg's own probe output. A file with
+ * no video stream, no duration, or unreadable headers is rejected by the caller
+ * so a corrupt/empty provider response can never be presented as a finished
+ * scene.
+ */
+export function probeVideo(filePath) {
+  return new Promise((resolve) => {
+    const child = spawn(config.media.ffmpegPath, ['-hide_banner', '-i', filePath], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stderr = [];
+    child.stdout?.on('data', (chunk) => stderr.push(chunk));
+    child.stderr?.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', () => resolve({ hasVideo: false, durationSeconds: 0, error: 'ffmpeg_unavailable' }));
+    child.on('close', () => {
+      const text = Buffer.concat(stderr).toString('utf8');
+      const durationMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
+      const durationSeconds = durationMatch
+        ? Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3])
+        : 0;
+      const videoLine = text.split('\n').find((line) => line.includes('Stream #') && line.includes('Video:'));
+      const sizeMatch = videoLine ? /,\s*(\d{2,5})x(\d{2,5})/.exec(videoLine) : null;
+      const codecMatch = videoLine ? /Video:\s*([a-zA-Z0-9._-]+)/.exec(videoLine) : null;
+      resolve({
+        hasVideo: Boolean(videoLine),
+        durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : 0,
+        width: sizeMatch ? Number(sizeMatch[1]) : 0,
+        height: sizeMatch ? Number(sizeMatch[2]) : 0,
+        codec: codecMatch ? codecMatch[1] : null,
+        hasAudio: /Stream #.*Audio:/.test(text),
+      });
+    });
+  });
+}
+
+/**
+ * Run FFmpeg while reporting real progress parsed from `-progress pipe:1`.
+ * `shouldCancel()` is polled on every progress event; returning true kills the
+ * process and rejects with an error flagged `cancelled`, so long renders can be
+ * stopped without leaving a half-written MP4 marked as complete.
+ */
+export function ffmpegWithProgress(args, { durationSeconds = 0, onProgress = () => {}, shouldCancel = () => false } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(config.media.ffmpegPath, ['-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1', '-y', ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const stderr = [];
+    let cancelled = false;
+    let lastEmit = 0;
+    child.stderr?.on('data', (chunk) => { stderr.push(chunk); if (stderr.length > 200) stderr.shift(); });
+    child.stdout?.on('data', (chunk) => {
+      const text = chunk.toString('utf8');
+      if (shouldCancel() && !cancelled) {
+        cancelled = true;
+        child.kill('SIGTERM');
+        return;
+      }
+      const match = /out_time_(?:ms|us)=(\d+)/.exec(text);
+      if (!match || !durationSeconds) return;
+      const seconds = Number(match[1]) / 1_000_000;
+      const ratio = Math.max(0, Math.min(1, seconds / durationSeconds));
+      const nowMs = Date.now();
+      if (nowMs - lastEmit < 900 && ratio < 1) return;
+      lastEmit = nowMs;
+      onProgress(ratio);
+    });
+    child.on('error', (error) => reject(error));
+    child.on('close', (code) => {
+      if (cancelled) {
+        const error = new Error('Rendering was cancelled.');
+        error.cancelled = true;
+        return reject(error);
+      }
+      if (code === 0) return resolve({ stderr: Buffer.concat(stderr).toString('utf8') });
+      const message = Buffer.concat(stderr).toString('utf8').slice(-4000) || `ffmpeg exited with code ${code}`;
+      return reject(new Error(message));
+    });
+  });
+}
+
+/** Decode any audio file to raw 16-bit mono PCM at the requested sample rate. */
+export function decodeAudioToPcm(filePath, { sampleRate = 24000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(config.media.ffmpegPath, [
+      '-hide_banner', '-loglevel', 'error', '-i', filePath,
+      '-vn', '-ac', '1', '-ar', String(sampleRate), '-f', 's16le', 'pipe:1',
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = [];
+    const errors = [];
+    child.stdout?.on('data', (chunk) => chunks.push(chunk));
+    child.stderr?.on('data', (chunk) => errors.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) return resolve(Buffer.concat(chunks));
+      reject(new Error(Buffer.concat(errors).toString('utf8').slice(-2000) || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
