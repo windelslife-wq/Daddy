@@ -32,7 +32,7 @@ function env(overrides = {}) {
     X_CONSUMER_SECRET: 'xconsumersecret12345',
     STRIPE_SECRET_KEY: 'sk_test_abcdef123456',
     STRIPE_WEBHOOK_SECRET: 'whsec_abcdef123456',
-    PUBLIC_BASE_URL: 'https://studio.example.com',
+    PUBLIC_BASE_URL: 'https://filmclublens.com',
     APP_ENCRYPTION_KEY: crypto.randomBytes(32).toString('base64'),
     ...overrides,
   };
@@ -144,10 +144,10 @@ test('signed webhook ping carries a correct HMAC signature', async () => {
     fetchImpl,
   });
   assert.equal(result.status, 'verified');
-  const timestamp = captured.init.headers['x-faceless-timestamp'];
+  const timestamp = captured.init.headers['x-film-club-lens-timestamp'];
   const expected = `sha256=${crypto.createHmac('sha256', secret).update(`${timestamp}.${captured.init.body}`).digest('hex')}`;
-  assert.equal(captured.init.headers['x-faceless-signature'], expected);
-  assert.equal(captured.init.headers['x-faceless-event'], 'activation.ping');
+  assert.equal(captured.init.headers['x-film-club-lens-signature'], expected);
+  assert.equal(captured.init.headers['x-film-club-lens-event'], 'activation.ping');
 });
 
 test('offline-default modules verify without any network access', async () => {

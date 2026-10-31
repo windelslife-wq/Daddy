@@ -122,7 +122,7 @@ before(async () => {
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
 
-  const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'creator@faceless.local', password: 'StudioDemo2026!' }) });
+  const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'creator@filmclublens.local', password: 'StudioDemo2026!' }) });
   cookie = (login.headers.getSetCookie?.() || []).map((value) => value.split(';')[0]).join('; ');
   assert.ok(cookie, 'demo login failed');
 

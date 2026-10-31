@@ -1,10 +1,11 @@
 export const SITE = {
-  name: 'Faceless Studio',
-  shortName: 'FS',
+  name: 'Film Club Lens',
+  shortName: 'FCL',
+  url: 'https://filmclublens.com',
   tagline: 'Create once. Publish everywhere.',
-  description: 'An AI-powered faceless video studio with real scheduling, official social publishing, analytics, and production safeguards.',
-  email: 'hello@faceless.studio',
-  securityEmail: 'security@faceless.studio',
+  description: 'Film Club Lens is an AI filmmaking and faceless-video studio with real scheduling, official social publishing, analytics, and production safeguards.',
+  email: 'hello@filmclublens.com',
+  securityEmail: 'security@filmclublens.com',
 };
 
 // One source of truth for the public website. Header menus, mobile navigation,
@@ -22,7 +23,7 @@ export const PUBLIC_PAGES = [
   { path: '/security', label: 'Security', title: 'Security', description: 'How credentials, sessions, webhooks, media, and account data are protected.', group: 'resources', icon: 'shield', eyebrow: 'Trust' },
   { path: '/changelog', label: 'Changelog', title: 'Product changelog', description: 'Recent platform improvements, integration work, and verification milestones.', group: 'resources', icon: 'clock', eyebrow: 'Updates' },
   { path: '/sitemap', label: 'Sitemap', title: 'Sitemap', description: 'Every public page and workspace destination in one organized index.', group: 'resources', icon: 'list-checks', eyebrow: 'Index' },
-  { path: '/about', label: 'About', title: 'About Faceless Studio', description: 'The principles behind a responsible, creator-first automation platform.', group: 'company', icon: 'users', eyebrow: 'Company' },
+  { path: '/about', label: 'About', title: 'About Film Club Lens', description: 'The principles behind a responsible, creator-first automation platform.', group: 'company', icon: 'users', eyebrow: 'Company' },
   { path: '/contact', label: 'Contact', title: 'Contact us', description: 'Talk to the team about setup, integrations, partnerships, or security.', group: 'company', icon: 'mail', eyebrow: 'Contact' },
   { path: '/careers', label: 'Careers', title: 'Careers', description: 'Help build trustworthy creative automation tools.', group: 'company', icon: 'briefcase', eyebrow: 'Careers' },
   { path: '/press', label: 'Press', title: 'Press and brand', description: 'Product facts, positioning, and media contact details.', group: 'company', icon: 'megaphone', eyebrow: 'Media' },

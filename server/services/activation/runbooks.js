@@ -102,7 +102,7 @@ export function renderModuleRunbook(module) {
 export function renderRunbooks() {
   const header = `# Activation runbook
 
-Every module below is **already implemented in code**. The Faceless Studio test
+Every module below is **already implemented in code**. The Film Club Lens test
 suite covers the OAuth flows, publishing adapters, Stripe webhooks,
 provider adapters, and analytics against a local simulator. What remains is
 **activation**: adding credentials, obtaining provider approval, and deploying
@@ -128,7 +128,7 @@ npm run setup -- --module facebook-pages
 npm run setup -- --verify               # live-verify all configured credentials
 npm run setup -- --verify stripe        # live-verify one module
 npm run doctor -- --probe # deployment readiness + public health probe
-npm run deploy:check -- --origin https://studio.example.com  # real external TLS/health check
+npm run deploy:check -- --origin https://filmclublens.com  # real external TLS/health check
 npm run db:bootstrap     # real PostgreSQL schema + two-worker claim proof
 \`\`\`
 

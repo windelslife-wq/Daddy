@@ -117,11 +117,11 @@ before(async () => {
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
   const login = await request('/api/auth/login', {
-    method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' },
+    method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' },
   });
   assert.equal(login.status, 200, `demo login failed: ${JSON.stringify(login.data)}`);
   cookie = (login.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
-  const user = await db('users').where({ email: 'creator@faceless.local' }).first();
+  const user = await db('users').where({ email: 'creator@filmclublens.local' }).first();
   userId = user.id;
 });
 

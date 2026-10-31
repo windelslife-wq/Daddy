@@ -1,4 +1,4 @@
-# Public HTTPS edge for Faceless Studio.
+# Public HTTPS edge for Film Club Lens.
 # Caddy obtains and renews a Let's Encrypt certificate for {$DOMAIN} automatically.
 # It sets X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-For, which the app
 # trusts because TRUST_PROXY=true. This satisfies module 12's deploy steps.

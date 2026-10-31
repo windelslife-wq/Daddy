@@ -253,9 +253,9 @@ async function verifyWebhook(ctx) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-faceless-event': 'activation.ping',
-      'x-faceless-timestamp': String(timestamp),
-      'x-faceless-signature': signature,
+      'x-film-club-lens-event': 'activation.ping',
+      'x-film-club-lens-timestamp': String(timestamp),
+      'x-film-club-lens-signature': signature,
     },
     body: raw,
     okStatuses: [200, 201, 202, 204],
@@ -309,7 +309,7 @@ async function verifyResearch(ctx) {
   const check = provider === 'brave'
     ? await httpCheck(ctx, {
       name: 'Brave Search API',
-      url: urlWithParams(`${ctx.roots.brave}/search`, { q: 'faceless studio activation', count: 1 }),
+      url: urlWithParams(`${ctx.roots.brave}/search`, { q: 'film club lens activation', count: 1 }),
       headers: { 'x-subscription-token': env.SEARCH_API_KEY, accept: 'application/json' },
       onOk: () => 'Brave accepted the API key (minimal 1-result query).',
       onFail: (data, status) => `Brave rejected the key (${status}): ${providerError(data)}.`,
@@ -319,7 +319,7 @@ async function verifyResearch(ctx) {
       url: `${ctx.roots.tavily}/search`,
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.SEARCH_API_KEY}` },
-      body: JSON.stringify({ query: 'faceless studio activation', max_results: 1 }),
+      body: JSON.stringify({ query: 'film club lens activation', max_results: 1 }),
       onOk: () => 'Tavily accepted the API key (minimal 1-result query).',
       onFail: (data, status) => `Tavily rejected the key (${status}): ${providerError(data)}.`,
     });

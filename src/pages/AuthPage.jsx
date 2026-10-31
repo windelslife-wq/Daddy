@@ -184,7 +184,7 @@ export default function AuthPage({ mode = 'login' }) {
               </button>
             </form>
             <div className="auth-switch">
-              {isSignup ? <>Already have an account? <Link to={authLink('/login')}>Sign in</Link></> : <>New to Faceless Studio? <Link to={authLink('/signup')}>Create an account</Link></>}
+              {isSignup ? <>Already have an account? <Link to={authLink('/login')}>Sign in</Link></> : <>New to Film Club Lens? <Link to={authLink('/signup')}>Create an account</Link></>}
             </div>
             {demo?.email && demo?.password && (
               <>

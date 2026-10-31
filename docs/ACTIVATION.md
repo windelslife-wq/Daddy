@@ -1,6 +1,6 @@
 # Activation runbook
 
-Every module below is **already implemented in code**. The Faceless Studio test
+Every module below is **already implemented in code**. The Film Club Lens test
 suite covers the OAuth flows, publishing adapters, Stripe webhooks,
 provider adapters, and analytics against a local simulator. What remains is
 **activation**: adding credentials, obtaining provider approval, and deploying
@@ -26,7 +26,7 @@ npm run setup -- --module facebook-pages
 npm run setup -- --verify               # live-verify all configured credentials
 npm run setup -- --verify stripe        # live-verify one module
 npm run doctor -- --probe # deployment readiness + public health probe
-npm run deploy:check -- --origin https://studio.example.com  # real external TLS/health check
+npm run deploy:check -- --origin https://filmclublens.com  # real external TLS/health check
 npm run db:bootstrap     # real PostgreSQL schema + two-worker claim proof
 ```
 
@@ -496,7 +496,7 @@ Nodemailer transport that mirrors in-app notifications to email. Fully implement
 | Variable | Secret | Required when | Purpose |
 |---|---|---|---|
 | `SMTP_URL` | yes | Always | e.g. smtps://user:password@smtp.example.com:465. URL-encode special characters in the password. |
-| `NOTIFICATION_FROM` | no | Optional | e.g. "Faceless Studio <notifications@example.com>". |
+| `NOTIFICATION_FROM` | no | Optional | e.g. "Film Club Lens <notifications@example.com>". |
 
 ### Provider console steps
 
@@ -531,7 +531,7 @@ preflight check.
 
 `id: notification-webhook` · category: `notifications` · type: `config`
 
-Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
+Outbound notification events with HMAC-SHA256 X-Film-Club-Lens-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
 
 ### Environment variables
 
@@ -543,7 +543,7 @@ Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt re
 ### Provider console steps
 
 1. **Generate a shared secret.** e.g. openssl rand -hex 24. Store the same value in your receiver.
-2. **Verify the signature.** Compute sha256 HMAC over "<x-faceless-timestamp>.<raw body>" and compare with a constant-time comparison against X-Faceless-Signature (sha256=…).
+2. **Verify the signature.** Compute sha256 HMAC over "<x-film-club-lens-timestamp>.<raw body>" and compare with a constant-time comparison against X-Film-Club-Lens-Signature (sha256=…).
 3. **Enforce a timestamp window.** Reject events older than 5 minutes to prevent replay.
 4. **Deduplicate by event id.** Delivery retries (3 attempts) can repeat the same notification.
 
@@ -738,7 +738,7 @@ The deployment itself. OAuth providers and Instagram require a real public HTTPS
 
 | Variable | Secret | Required when | Purpose |
 |---|---|---|---|
-| `PUBLIC_BASE_URL` | no | Always | Exact origin registered with every OAuth provider and Stripe, e.g. https://studio.example.com |
+| `PUBLIC_BASE_URL` | no | Always | Exact origin registered with every OAuth provider and Stripe, e.g. https://filmclublens.com |
 | `NODE_ENV` | no | Recommended (default `production`) | Set to production for a real deployment. |
 | `SECURE_COOKIES` | no | Recommended (default `true`) | Set to true when served over HTTPS. |
 
@@ -793,12 +793,12 @@ Knex already supports PostgreSQL via DATABASE_URL, including schema creation, se
 
 | Variable | Secret | Required when | Purpose |
 |---|---|---|---|
-| `DATABASE_URL` | no | Always | postgresql://user:password@host:5432/faceless_studio?sslmode=require — include the database name. |
+| `DATABASE_URL` | no | Always | postgresql://user:password@host:5432/filmclublens?sslmode=require — include the database name. |
 
 ### Deployment steps
 
-1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example faceless_studio); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
-2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/faceless_studio?sslmode=require
+1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example filmclublens); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
+2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/filmclublens?sslmode=require
 3. **Store it as a secret.** Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.
 4. **Prove the connection and schema.** With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.
 5. **Use a least-privilege role.** Grant only the schema privileges the app needs and keep superuser out of the runtime role.

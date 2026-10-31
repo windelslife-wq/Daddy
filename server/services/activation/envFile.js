@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 
-const ADDED_HEADER = '## Added by the Faceless Studio setup wizard';
+const ADDED_HEADER = '## Added by the Film Club Lens setup wizard';
 const KEY_LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
 const COMMENTED_KEY_LINE = /^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
 

@@ -1,6 +1,6 @@
 # AI Filmmaking Platform — Setup, Providers & Limits
 
-Faceless Studio now includes a professional, **scene-by-scene AI filmmaking** product supporting:
+Film Club Lens now includes a professional, **scene-by-scene AI filmmaking** product supporting:
 
 - **Short dramas** — vertical 9:16 stories for TikTok, YouTube Shorts, Instagram Reels and Facebook.
 - **Long dramas** — multi-scene stories assembled into one continuous film.

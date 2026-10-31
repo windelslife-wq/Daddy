@@ -160,7 +160,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 | Variable | Secret | What it is | Command |
 |---|---|---|---|
-| `PUBLIC_BASE_URL` | no | Exact origin registered with every OAuth provider and Stripe, e.g. https://studio.example.com | `npm run setup -- --set PUBLIC_BASE_URL=<VALUE>` |
+| `PUBLIC_BASE_URL` | no | Exact origin registered with every OAuth provider and Stripe, e.g. https://filmclublens.com | `npm run setup -- --set PUBLIC_BASE_URL=<VALUE>` |
 | `NODE_ENV` | no | Set to production for a real deployment. | `npm run setup -- --set NODE_ENV=<VALUE>` |
 | `SECURE_COOKIES` | no | Set to true when served over HTTPS. | `npm run setup -- --set SECURE_COOKIES=<VALUE>` |
 
@@ -248,7 +248,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 | Variable | Secret | What it is | Command |
 |---|---|---|---|
-| `DATABASE_URL` | no | postgresql://user:password@host:5432/faceless_studio?sslmode=require — include the database name. | `npm run setup -- --set DATABASE_URL=<VALUE>` |
+| `DATABASE_URL` | no | postgresql://user:password@host:5432/filmclublens?sslmode=require — include the database name. | `npm run setup -- --set DATABASE_URL=<VALUE>` |
 
 ### What can be done from this repository now
 
@@ -261,8 +261,8 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 ### Deployment steps
 
-1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example faceless_studio); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
-2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/faceless_studio?sslmode=require
+1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example filmclublens); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
+2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/filmclublens?sslmode=require
 3. **Store it as a secret.** Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.
 4. **Prove the connection and schema.** With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.
 5. **Use a least-privilege role.** Grant only the schema privileges the app needs and keep superuser out of the runtime role.
@@ -657,7 +657,7 @@ steps you have not done — the audit must stay truthful.
 
 `id: notification-webhook` · category: `notifications` · type: `config` · **UNFINISHED**
 
-Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
+Outbound notification events with HMAC-SHA256 X-Film-Club-Lens-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
 
 | Check | Value |
 |---|---|
@@ -695,7 +695,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 ### Provider console steps
 
 1. **Generate a shared secret.** e.g. openssl rand -hex 24. Store the same value in your receiver.
-2. **Verify the signature.** Compute sha256 HMAC over "<x-faceless-timestamp>.<raw body>" and compare with a constant-time comparison against X-Faceless-Signature (sha256=…).
+2. **Verify the signature.** Compute sha256 HMAC over "<x-film-club-lens-timestamp>.<raw body>" and compare with a constant-time comparison against X-Film-Club-Lens-Signature (sha256=…).
 3. **Enforce a timestamp window.** Reject events older than 5 minutes to prevent replay.
 4. **Deduplicate by event id.** Delivery retries (3 attempts) can repeat the same notification.
 

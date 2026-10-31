@@ -21,7 +21,7 @@ if (process.argv.includes('--json')) {
   console.log(JSON.stringify(report, null, 2));
 } else {
   const icons = { pass: 'PASS', warn: 'WARN', fail: 'FAIL', external: 'EXTERNAL' };
-  console.log(`\nFaceless Studio integration readiness — ${report.generatedAt}`);
+  console.log(`\nFilm Club Lens integration readiness — ${report.generatedAt}`);
   console.log(`Environment: ${report.environment}`);
   console.log(`Overall: ${report.overall.toUpperCase()}  (${report.summary.pass} pass, ${report.summary.warn} warn, ${report.summary.fail} fail, ${report.summary.external} external)\n`);
   for (const item of report.checks) {

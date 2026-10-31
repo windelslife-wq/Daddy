@@ -1,4 +1,4 @@
-/* AI Filmmaking workspace — extends the Faceless Studio design system. */
+/* AI Filmmaking workspace — extends the Film Club Lens design system. */
 /* Keep the wide horizontal nav from expanding the mobile layout viewport.
    `clip` (unlike hidden) does not create a scroll container, so fixed-position
    modals and sticky elements inside the workspace still behave normally. */

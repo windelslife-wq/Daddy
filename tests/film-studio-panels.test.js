@@ -72,7 +72,7 @@ before(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 
   const login = await request('/api/auth/login', {
-    method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' },
+    method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' },
   });
   assert.equal(login.status, 200, JSON.stringify(login.data));
   cookie = cookieFrom(login);

@@ -28,7 +28,7 @@ export default function SandboxConsent() {
   return (
     <div className="public-page">
       <Card className="public-card">
-        <div className="row" style={{ marginBottom: 18 }}><div className="brand-mark"><Sparkles size={20} /></div><div><strong>Faceless Studio</strong><small style={{ display: 'block' }}>Authorization request</small></div></div>
+        <div className="row" style={{ marginBottom: 18 }}><div className="brand-mark"><Sparkles size={20} /></div><div><strong>Film Club Lens</strong><small style={{ display: 'block' }}>Authorization request</small></div></div>
         <h1>Connect a local sandbox channel</h1>
         <p>This creates a real local HTTP publishing target on this server. It is for end-to-end testing only and does not contact any external social network.</p>
         <ErrorBanner error={error} />

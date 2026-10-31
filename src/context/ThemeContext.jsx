@@ -7,7 +7,7 @@ export const THEMES = [
   { id: 'aurora', label: 'Aurora', description: 'High-contrast teal dark theme', swatch: 'linear-gradient(135deg, #21d4a8, #4fd1ff)' },
 ];
 
-const STORAGE_KEY = 'faceless-studio-theme';
+const STORAGE_KEY = 'film-club-lens-theme';
 const ThemeContext = createContext(null);
 
 function systemTheme() {

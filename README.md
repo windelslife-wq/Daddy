@@ -1,4 +1,6 @@
-# Faceless Studio
+# Film Club Lens
+
+**Website:** https://filmclublens.com
 
 A full-stack, production-oriented AI **filmmaking and social media automation** platform. It creates short dramas, long dramas, episodic series and movies scene by scene with real AI video providers, assembles them into playable MP4 films with voices, subtitles and music, and also supports the original faceless-video workflow: scripts, original visuals, narration, rendering, scheduling and official social publishing.
 
@@ -93,8 +95,8 @@ Open `http://localhost:8787`.
 Preview credentials seeded in development:
 
 ```text
-Creator: creator@faceless.local / StudioDemo2026!
-Admin:   admin@faceless.local   / AdminStudio2026!
+Creator: creator@filmclublens.local / StudioDemo2026!
+Admin:   admin@filmclublens.local   / AdminStudio2026!
 ```
 
 > Change or disable seeded accounts before exposing a deployment. Set `SEED_DEMO=false` and provide `ADMIN_EMAIL` / `ADMIN_PASSWORD` deliberately.
@@ -153,7 +155,7 @@ npm run setup -- --confirm smtp --note "SPF/DKIM verified, ticket 4471"
 npm run setup -- --unconfirm smtp        # undo a mistaken attestation
 npm run activate -- --list               # remaining modules, dependency order
 KEY=value npm run activate -- smtp       # one-by-one: configure, verify, record
-npm run deploy:check -- --origin https://studio.example.com
+npm run deploy:check -- --origin https://filmclublens.com
 npm run db:bootstrap                     # real Postgres + two-worker claim proof
 ```
 
@@ -341,7 +343,7 @@ Official docs used for the adapters:
 
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`: enable paid subscription checkout and signed webhooks.
 - Each paid plan needs a real Stripe `price_...` ID in Admin → Plans. Without it, checkout returns `stripe_price_missing`; no fake charge is attempted.
-- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook; set `NOTIFICATION_WEBHOOK_SECRET` to verify the HMAC `X-Faceless-Signature` (`sha256=HMAC(secret, "timestamp.rawBody")`). In-app notifications work without either.
+- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook; set `NOTIFICATION_WEBHOOK_SECRET` to verify the HMAC `X-Film-Club-Lens-Signature` (`sha256=HMAC(secret, "timestamp.rawBody")`). In-app notifications work without either.
 
 ---
 
@@ -455,7 +457,7 @@ PostgreSQL + Caddy automatic HTTPS), `deploy/Caddyfile`, a dedicated
 cp .env.example .env && chmod 600 .env      # set DOMAIN, POSTGRES_PASSWORD, APP_ENCRYPTION_KEY
 docker compose up -d --build --scale worker=2
 npm run db:bootstrap                        # real Postgres schema + two-worker claim proof
-npm run deploy:check -- --origin https://studio.example.com --json
+npm run deploy:check -- --origin https://filmclublens.com --json
 ```
 
 `deploy:check` runs from **outside** the host and performs a real DNS lookup,

@@ -321,10 +321,10 @@ before(async () => {
   const app = await createApp();
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
-  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' } });
+  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' } });
   assert.equal(login.status, 200);
   cookie = (login.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
-  userId = (await db('users').where({ email: 'creator@faceless.local' }).first()).id;
+  userId = (await db('users').where({ email: 'creator@filmclublens.local' }).first()).id;
   await db('credit_accounts').where({ user_id: userId }).update({ balance: 500000 });
   await db('credit_ledger').where({ user_id: userId }).del();
 });

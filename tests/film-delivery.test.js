@@ -141,7 +141,7 @@ before(async () => {
   const app = await createApp();
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
-  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' } });
+  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' } });
   assert.equal(login.status, 200, JSON.stringify(login.data));
   cookie = cookieFrom(login);
 

@@ -101,7 +101,7 @@ before(async () => {
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
 
-  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' } });
+  const login = await request('/api/auth/login', { method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' } });
   assert.equal(login.status, 200, JSON.stringify(login.data));
   cookie = cookieFrom(login);
 
@@ -229,7 +229,7 @@ test('assembly burns the edit into a real MP4 with an H.264 video stream', async
   assert.ok([200, 202].includes(assemble.status), JSON.stringify(assemble.data));
 
   const { processFilmAssemblyJob } = await import('../server/film/scenes.js');
-  const user = await db('users').where({ email: 'creator@faceless.local' }).first();
+  const user = await db('users').where({ email: 'creator@filmclublens.local' }).first();
   await processFilmAssemblyJob({ filmId: film.id, userId: user.id, attempt: 1, subtitles: false, burnSubtitles: false });
 
   const row = await db('film_projects').where({ id: film.id }).first();

@@ -262,11 +262,11 @@ test('external service modules work against simulated official APIs', async (t) 
     assert.equal(result.data.ok, true);
     const email = await poll('SMTP email', () => simulator.emails.find((item) => item.envelope.to.includes(userEmail)));
     assert.ok(email);
-    assert.match(email.message, /Faceless Studio|Notification|Test/i);
+    assert.match(email.message, /Film Club Lens|Notification|Test/i);
     const webhook = await poll('signed notification webhook', () => simulator.webhookEvents.at(-1));
-    const timestamp = String(webhook.headers['x-faceless-timestamp']);
+    const timestamp = String(webhook.headers['x-film-club-lens-timestamp']);
     const expected = `sha256=${crypto.createHmac('sha256', env.NOTIFICATION_WEBHOOK_SECRET).update(`${timestamp}.${JSON.stringify(webhook.body)}`).digest('hex')}`;
-    assert.equal(webhook.headers['x-faceless-signature'], expected);
-    assert.equal(webhook.headers['x-faceless-event'], 'notification.created');
+    assert.equal(webhook.headers['x-film-club-lens-signature'], expected);
+    assert.equal(webhook.headers['x-film-club-lens-event'], 'notification.created');
   });
 });

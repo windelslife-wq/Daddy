@@ -1,9 +1,9 @@
-/* Faceless Studio service worker.
+/* Film Club Lens service worker.
  * Caches the app shell for offline navigation only. API responses, media and
  * authenticated pages are NEVER cached — credits, jobs and videos must always
  * reflect the server's real state.
  */
-const CACHE = 'faceless-studio-shell-v1';
+const CACHE = 'film-club-lens-shell-v1';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (event) => {

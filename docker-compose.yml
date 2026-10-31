@@ -1,4 +1,4 @@
-# Production stack for Faceless Studio.
+# Production stack for Film Club Lens.
 # Implements activation modules 12 (public HTTPS origin) and 13 (PostgreSQL +
 # multiple workers). Secrets come from a gitignored .env on the host.
 #
@@ -7,7 +7,7 @@
 #   docker compose up -d --build --scale worker=2
 #   npm run deploy:check
 #
-name: faceless-studio
+name: film-club-lens
 
 x-app-environment: &app-environment
   NODE_ENV: production
@@ -18,7 +18,7 @@ x-app-environment: &app-environment
   SEED_DEMO: "false"
   PUBLIC_BASE_URL: "https://${DOMAIN:?set DOMAIN to your public hostname}"
   APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:?set APP_ENCRYPTION_KEY - generate with npm run setup -- --generate-key}"
-  DATABASE_URL: "postgresql://${POSTGRES_USER:-faceless}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-faceless_studio}"
+  DATABASE_URL: "postgresql://${POSTGRES_USER:-filmclublens}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-filmclublens}"
   DATA_DIR: /app/data
   STORAGE_DIR: /app/storage
 
@@ -39,14 +39,14 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-faceless_studio}
-      POSTGRES_USER: ${POSTGRES_USER:-faceless}
+      POSTGRES_DB: ${POSTGRES_DB:-filmclublens}
+      POSTGRES_USER: ${POSTGRES_USER:-filmclublens}
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}"
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-faceless} -d ${POSTGRES_DB:-faceless_studio}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-filmclublens} -d ${POSTGRES_DB:-filmclublens}"]
       interval: 5s
       timeout: 3s
       retries: 20

@@ -84,7 +84,7 @@ before(async () => {
     EXPOSE_DEMO_CREDENTIALS: 'true',
     ADMIN_EMAIL: '',
     ADMIN_PASSWORD: '',
-    DEMO_EMAIL: 'visual@faceless.local',
+    DEMO_EMAIL: 'visual@filmclublens.local',
     DEMO_PASSWORD: 'VisualQA2026!',
     PORT: String(port),
     HOST: '127.0.0.1',
@@ -170,7 +170,7 @@ test('professional global website, themes, authentication, workspace, and respon
   await t.test('contact form submits through the real backend endpoint', async () => {
     await page.goto(`${base}/contact`, { waitUntil: 'networkidle' });
     await page.getByLabel('Your name').fill('Visual QA');
-    await page.getByLabel('Email address').fill('visual-qa@faceless.local');
+    await page.getByLabel('Email address').fill('visual-qa@filmclublens.local');
     await page.getByLabel('What is this about?').selectOption('support');
     await page.getByLabel('Message').fill('Please verify that the public contact form stores a real message and returns a reference.');
     await page.getByRole('button', { name: /Send message/i }).click();
@@ -227,7 +227,7 @@ test('professional global website, themes, authentication, workspace, and respon
   await t.test('signup creates a real account and reaches the workspace', async () => {
     await page.goto(`${base}/signup`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: /Create your workspace/i }).waitFor();
-    const email = `visual-signup-${Date.now()}@faceless.local`;
+    const email = `visual-signup-${Date.now()}@filmclublens.local`;
     await page.getByLabel('Full name').fill('Visual QA User');
     await page.getByLabel('Email address').fill(email);
     await page.getByLabel('Create password', { exact: true }).fill('StudioSignup2026!');

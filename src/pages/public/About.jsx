@@ -18,7 +18,7 @@ export default function About() {
       <PageHero
         eyebrow="About"
         title="Build creative automation people can actually trust"
-        description="Faceless Studio was designed as a complete content operations system, not a collection of attractive buttons. Every claim in the interface maps to a real workflow, a configuration requirement, or an explicitly labeled local simulation."
+        description="Film Club Lens was designed as a complete content operations system, not a collection of attractive buttons. Every claim in the interface maps to a real workflow, a configuration requirement, or an explicitly labeled local simulation."
         actions={<><Link to="/features" className="btn btn-primary btn-lg">Explore the platform <Icon name="arrow-right" size={16} /></Link><Link to="/security" className="btn btn-secondary btn-lg">Read security approach</Link></>}
       />
       <Section eyebrow="Our approach" title="Principles that shape the platform" description="These principles influence the architecture, user experience, documentation, and integration boundaries." align="center">

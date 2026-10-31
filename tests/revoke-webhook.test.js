@@ -89,10 +89,10 @@ test('notification webhook payloads are HMAC signed and delivered', async () => 
   assert.equal(result.delivered, true);
   const received = requests.filter((request) => request.url === '/webhook').at(-1);
   assert.ok(received);
-  const timestamp = String(received.headers['x-faceless-timestamp']);
+  const timestamp = String(received.headers['x-film-club-lens-timestamp']);
   const expected = `sha256=${crypto.createHmac('sha256', webhookSecret).update(`${timestamp}.${received.body}`).digest('hex')}`;
-  assert.equal(received.headers['x-faceless-signature'], expected);
-  assert.equal(received.headers['x-faceless-event'], 'notification.created');
+  assert.equal(received.headers['x-film-club-lens-signature'], expected);
+  assert.equal(received.headers['x-film-club-lens-event'], 'notification.created');
   assert.equal(JSON.parse(received.body).id, 'ntf_direct');
 });
 

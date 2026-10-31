@@ -1,7 +1,7 @@
-# WINDELS AI FILM STUDIO — repository audit & implementation report
+# Film Club Lens — repository audit & implementation report
 
 **Date:** 2026-10-31
-**Scope:** the existing Faceless Studio / WINDELS AI OS repository, its AI Filmmaking
+**Scope:** the existing Film Club Lens repository, its AI Filmmaking
 subsystem, and the 12 modules requested in the upgrade brief.
 
 This report follows the brief's rule: *a feature counts only when it works end to

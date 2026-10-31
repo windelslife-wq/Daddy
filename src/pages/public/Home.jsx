@@ -27,7 +27,7 @@ export default function Home() {
         className="home-hero"
         eyebrow="AI faceless video operations"
         title={<>Turn one idea into a complete publishing workflow.</>}
-        description="Faceless Studio combines script generation, original scene creation, narration, captions, scheduling, official social publishing, and analytics in one professional workspace."
+        description="Film Club Lens combines script generation, original scene creation, narration, captions, scheduling, official social publishing, and analytics in one professional workspace."
         actions={<>
           <Link to="/signup" className="btn btn-primary btn-lg">Start creating <Icon name="arrow-right" size={17} /></Link>
           <Link to="/docs" className="btn btn-secondary btn-lg"><Icon name="book" size={17} /> Read the docs</Link>

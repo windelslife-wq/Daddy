@@ -77,8 +77,8 @@ test('production-ready configuration reports no blocking checks and keeps extern
   const env = {
     ...baseEnv('production'),
     NODE_ENV: 'production',
-    PUBLIC_BASE_URL: 'https://studio.example.com',
-    APP_URL: 'https://studio.example.com',
+    PUBLIC_BASE_URL: 'https://filmclublens.com',
+    APP_URL: 'https://filmclublens.com',
     DATABASE_URL: 'postgresql://faceless:secret@db.example.com:5432/faceless',
     WORKER_ENABLED: 'true',
     META_APP_ID: 'meta-app',

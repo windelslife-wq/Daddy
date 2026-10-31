@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Faceless Studio — activation wizard.
+ * Film Club Lens — activation wizard.
  *
  * Works through the unfinished modules one by one. It never contacts a
  * provider and never prints a secret. It only reads/writes a gitignored .env,
@@ -84,7 +84,7 @@ function parseArgs(argv) {
 
 function help() {
   console.log(`
-${bold('Faceless Studio activation wizard')}
+${bold('Film Club Lens activation wizard')}
 
 ${dim('Works through the unfinished modules one by one. No provider is ever')}
 ${dim('contacted; secrets are never printed.')}
