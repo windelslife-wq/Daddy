@@ -371,7 +371,64 @@ This application is plumbing; **you are responsible for the rights to what you g
 
 ---
 
-## 9. Verifying locally
+## 9. Deploying the film studio
+
+**Build and start.** The API and the built SPA are served by one Node process:
+
+```bash
+npm ci
+npm run build
+NODE_ENV=production WORKER_ENABLED=true npm start
+```
+
+`WORKER_ENABLED=true` is required in production: scene jobs, assembly jobs and
+retries are executed by the background worker, and the queue is in the database,
+so a restart resumes unfinished work. With the worker disabled the UI still
+works, but nothing will ever render.
+
+**Configuration.** Nothing here is required to open the studio — missing pieces
+degrade honestly (a labelled offline screenplay, procedural stills, local voice
+takes, no clips). Add credentials only for the features you want:
+
+| Variable | Enables | Notes |
+|---|---|---|
+| `APP_URL`, `PUBLIC_BASE_URL` | Auth + CORS + signed media URLs | Must equal the external HTTPS origin, or browser calls are rejected. |
+| `APP_ENCRYPTION_KEY` | Encrypted provider keys at rest | Generate with `npm run setup -- --generate-key`. |
+| `FILM_VIDEO_PROVIDER` + `REPLICATE_API_TOKEN` / `FAL_API_KEY` / `GOOGLE_VEO_API_KEY` | Real scene clips | Without one, generation returns `503` and never fabricates footage. |
+| `AI_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Genuine screenplays | Otherwise the writer is `local-template` and says so. |
+| `IMAGE_PROVIDER=procedural\|openai\|replicate` | Storyboards, posters, concept art | `procedural` needs no key and is labelled non-AI. |
+| `TTS_PROVIDER=mespeak\|openai\|elevenlabs` | Voice takes and the final mix | `mespeak` is offline. |
+| `FFMPEG_PATH` | Rendering | Bundled by default via `@ffmpeg-installer/ffmpeg`; set an absolute path when the bundled binary cannot run. |
+| `FILM_MAX_SCENES`, `FILM_MAX_SCENE_SECONDS`, `FILM_MAX_PROJECT_SECONDS` | Runtime limits | Advertised to the UI as `maxProducibleSeconds`. |
+| `FILM_ASSEMBLY_SEGMENT_SCENES` | Peak temp disk during render | Lower it on small disks. |
+| `FILM_TRANSITION_FADE_SECONDS` | Fade length for timeline transitions | Default `0.5`, clamped to 0.1–2. |
+| `DATA_DIR`, `STORAGE_DIR`, `SQLITE_PATH` | Persistence | Clips, stills and WAVs are written to `STORAGE_DIR`. |
+| `DATABASE_URL` | PostgreSQL instead of SQLite | Optional; the film tables are created by the same additive migration. |
+
+**Database.** Migrations run automatically on boot and are additive and
+idempotent (the suite upgrades a pre-upgrade database in place). Deploy the new
+version, then confirm the log lines `Created database table` /
+`Added film column` appear exactly once.
+
+**Disk.** Stills are ~0.3–2 MB each, voice takes a few hundred KB, scene clips
+tens of MB and the render needs temporary space proportional to the film. Local
+disk is the default; for multi-node deployments move `STORAGE_DIR` to shared
+object storage and set `DATABASE_URL`.
+
+**Smoke test after deploy.**
+
+```bash
+curl -s "$PUBLIC_BASE_URL/api/meta/health"
+curl -s -H "cookie: <session>" "$PUBLIC_BASE_URL/api/films/models"   # readiness
+curl -s -H "cookie: <session>" "$PUBLIC_BASE_URL/api/films/production"
+```
+
+`/api/films/models` is the fastest truth check: it reports every provider as
+`ready` or `needs credentials`, and the studio UI mirrors it.
+
+---
+
+## 10. Verifying locally
 
 ```bash
 npm ci
