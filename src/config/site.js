@@ -74,6 +74,7 @@ export const FILM_PAGES = [
   { path: '/app/films/short', label: 'Short Drama Studio', icon: 'smartphone' },
   { path: '/app/films/long', label: 'Long Drama & Movie', icon: 'film' },
   { path: '/app/films/series', label: 'Series & Episodes', icon: 'layers' },
+  { path: '/app/films/agent', label: 'AI Production Agent', icon: 'list-checks' },
   { path: '/app/films/scripts', label: 'AI Script Writer', icon: 'pen-line' },
   { path: '/app/films/characters', label: 'Character Studio', icon: 'users' },
   { path: '/app/films/scenes', label: 'Scene Generator', icon: 'wand-sparkles' },

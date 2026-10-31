@@ -65,6 +65,26 @@ single free-text camera field:
   locations, runtime drift, TTS availability and render status. Each check
   returns `pass | warn | fail | skip` with evidence; nothing passes by default.
 
+### The AI Production Agent (Phase 2)
+
+`/app/films/agent` turns one written brief into a full, resumable production.
+The agent orchestrates the existing services rather than duplicating them:
+analyse → screenplay → cast → locations → direction run automatically because
+they cost nothing, then **generation** and **assembly** each wait for an explicit
+approval because they spend credits and call a paid provider.
+
+- The brief parser (`server/film/production.js`) derives format, runtime, genre,
+  language and cast size locally, so a run is reproducible without any AI key.
+- Every unique setting in the script becomes a saved location and every scene is
+  linked to it; scenes without direction get a deterministic shot from the
+  cinematography palette.
+- Progress is persisted in `film_productions`, so a restart resumes exactly where
+  the run stopped.
+- A run is marked **completed only when a real MP4 exists**. When a provider is
+  missing the API returns `503 video_provider_unavailable`, the run shows
+  `blocked`, and the exact failing scene numbers are listed with a retry action.
+  Nothing is fabricated and no stage silently succeeds.
+
 The full audit and the remaining phases are documented in
 [docs/FILM-STUDIO-AUDIT.md](FILM-STUDIO-AUDIT.md).
 
@@ -241,6 +261,11 @@ All routes require an authenticated session and are mounted at `/api/films`.
 | POST | `/:id/scenes/:sceneId/generate` | Generate or regenerate **one** scene. |
 | GET | `/:id/scenes/:sceneId/clip` | Stream the real provider MP4 (range requests). |
 | GET | `/:id/scenes/:sceneId/poster` | Stream the poster frame. |
+| POST | `/production/start` | Start a production from a brief (creates the project). |
+| GET | `/production` | List the caller's production runs and stage definitions. |
+| GET | `/:id/production` | Live stage board with scene counts, QC, credits and failures. |
+| POST | `/:id/production/advance` | `generate`, `assemble`, `retry` or `sync`. |
+| POST | `/:id/production/cancel` | Stop the run and cancel in-flight scene jobs. |
 | GET | `/:id/preflight` | Assembly readiness + missing scenes + render cost. |
 | POST | `/:id/assemble` | Queue final FFmpeg render (`subtitles`, `burnSubtitles`). |
 | POST | `/:id/assembly/cancel` | Cancel a running render and refund it. |
@@ -263,9 +288,9 @@ All routes require an authenticated session and are mounted at `/api/films`.
 
 Routes (all under the existing authenticated `/app` shell, same brand, themes and navigation):
 
-`/app/films` hub · `/short` · `/long` · `/series` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|scenes|render|preview`.
+`/app/films` hub · `/short` · `/long` · `/series` · `/agent` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|locations|scenes|render|preview`.
 
-The project workspace is a six-step resumable wizard. Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
+The project workspace is a seven-step resumable wizard (setup, screenplay, cast, locations, direct & generate, assemble, preview). Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
 
 ### Web, Android, iOS
 

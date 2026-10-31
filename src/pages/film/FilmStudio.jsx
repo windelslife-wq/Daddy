@@ -671,7 +671,12 @@ export default function FilmStudio({ view = 'hub' }) {
     default: body = <Hub />;
   }
   return (
-    <FilmShell view={view} title={title} subtitle={subtitle} actions={view === 'hub' ? <Button onClick={() => navigate('/app/films/scripts')}><PenLine size={15} /> Open AI Script Writer</Button> : undefined}>
+    <FilmShell view={view} title={title} subtitle={subtitle} actions={view === 'hub' ? (
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button onClick={() => navigate('/app/films/agent')}><Sparkles size={15} /> AI Production Agent</Button>
+        <Button variant="secondary" onClick={() => navigate('/app/films/scripts')}><PenLine size={15} /> AI Script Writer</Button>
+      </div>
+    ) : undefined}>
       {body}
     </FilmShell>
   );

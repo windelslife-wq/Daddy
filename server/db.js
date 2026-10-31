@@ -464,6 +464,22 @@ export const tableDefinitions = {
     t.string('updated_at', 40).notNullable();
     t.unique(['film_id', 'ordinal']);
   },
+  film_productions: (t) => {
+    t.string('id', 48).primary();
+    t.string('film_id', 48).notNullable().unique();
+    t.string('user_id', 48).notNullable().index();
+    t.text('brief').notNullable().defaultTo('');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.string('current_stage', 40).notNullable().defaultTo('analyze');
+    t.text('plan').notNullable().defaultTo('{}');
+    t.text('stages').notNullable().defaultTo('{}');
+    t.text('options').notNullable().defaultTo('{}');
+    t.integer('retries').notNullable().defaultTo(0);
+    t.text('error');
+    t.string('completed_at', 40);
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
   film_episodes: (t) => {
     t.string('id', 48).primary();
     t.string('series_id', 48).notNullable().index();

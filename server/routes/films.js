@@ -38,6 +38,10 @@ import {
 } from '../film/locations.js';
 import { filmQualityReport } from '../film/continuity.js';
 import {
+  startProduction, productionSnapshot, advanceProduction, cancelProduction,
+  listProductions, PRODUCTION_STAGES,
+} from '../film/production.js';
+import {
   seriesSchema, episodeSchema, patchEpisodeSchema, EPISODE_STATUSES,
   createSeries, listSeries, seriesDetail, updateSeries, deleteSeries,
   createEpisode, updateEpisode, deleteEpisode, generateEpisodeScreenplay, bulkCreateEpisodes,
@@ -155,6 +159,16 @@ export function filmRouter() {
       ttsProvider: config.media.ttsProvider,
       videoProvider: provider,
     });
+  }));
+
+  // ---- Production agent ----------------------------------------------------
+  router.get('/production', h(async (req, res) => {
+    res.json({ productions: await listProductions(req.user.id), stages: PRODUCTION_STAGES });
+  }));
+
+  router.post('/production/start', h(async (req, res) => {
+    const result = await startProduction(req.user.id, req.body || {}, req.user.role);
+    res.status(201).json(result);
   }));
 
   router.post('/estimate', h(async (req, res) => {
@@ -339,6 +353,19 @@ export function filmRouter() {
   router.delete('/:id/locations/:locationId', h(async (req, res) => {
     await ownedFilm(req.user.id, req.params.id, req.user.role);
     res.json(await deleteLocation(req.user.id, req.params.locationId));
+  }));
+
+  // ---- Production agent (per project) --------------------------------------
+  router.get('/:id/production', h(async (req, res) => {
+    res.json(await productionSnapshot(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/production/advance', h(async (req, res) => {
+    res.json(await advanceProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/production/cancel', h(async (req, res) => {
+    res.json(await cancelProduction(req.user.id, req.params.id, req.user.role));
   }));
 
   // ---- Quality control / continuity ---------------------------------------

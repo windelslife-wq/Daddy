@@ -48,7 +48,7 @@ Nothing below is inferred from a button label or a table name alone.
 Status legend: **DONE** = works end to end; **PARTIAL** = real backend exists but
 coverage is incomplete; **MISSING** = no working implementation.
 
-| # | Module | Before this phase | After Phase 1 | What is still missing |
+| # | Module | Before this phase | After Phase 2 | What is still missing |
 |---|---|---|---|---|
 | 1 | AI Director Studio | PARTIAL — prompt-only "camera movement" | **PARTIAL+** — shot size, angle, lens, lighting, grade, movement and composition are stored, validated and injected into the provider prompt; the AI screenplay now authors them | Multi-shot coverage inside one scene, automatic continuation between scenes, dedicated storyboard view |
 | 2 | Actor & Character Studio | PARTIAL — name, role, description, appearance prompt, voice preset, reference image, series reuse, casting | Same | Expressions, outfits, age variants, poses, character relationships, user-level (cross-project) cast library |
@@ -60,7 +60,7 @@ coverage is incomplete; **MISSING** = no working implementation.
 | 8 | Marketing & Ad Studio | MISSING | **PARTIAL** — `advertisement` is a first-class project format with its own duration/aspect defaults | Product intake, product photography, ad variations, brand kits |
 | 9 | Creative Canvas | MISSING | Not started | Node graph, templates, execution history |
 | 10 | Movie Editing Studio | PARTIAL — reorder, edit prompts/dialogue, regenerate, subtitles, music, SFX, render | Same | Multi-track NLE, trimming/splitting, transitions, per-scene audio editing, text overlays |
-| 11 | Production Agent | MISSING | Not started (primitives exist: screenplay → cast → scenes → generate-all) | Conversational orchestration with per-stage approval and retry budgets |
+| 11 | Production Agent | MISSING | **DONE (orchestrator)** — one brief drives analyse → screenplay → cast → locations → direction, stops at a credit-spending gate, then generation → QC → assembly → export, with retry and cancel | Natural-language revision of a finished stage, scheduled/unattended runs, per-run concurrency caps |
 | 12 | Model Marketplace | PARTIAL — static provider catalogue, encrypted server-side keys, admin activation | Same | Dynamic registry, per-model pricing, health monitoring, automatic fallback |
 
 **Continuity engine** (brief §5): PARTIAL → improved. Project/series characters,
@@ -129,11 +129,69 @@ cards and the new-project form. Existing formats are unchanged.
 
 ---
 
-## 5. Test evidence
+## 5. Phase 2 — AI Production Agent (implemented and tested)
+
+The agent is an **orchestrator, not a second implementation**. Every stage calls
+the services that already existed (`generateScreenplay`, `saveScreenplay`,
+locations CRUD, `directScenes`, `requestAllScenes`, `filmQualityReport`,
+`requestAssembly`). No prompt, provider, credit rule or FFmpeg command is
+duplicated — the audit's "no parallel infrastructure" rule holds.
+
+### 5.1 API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/films/production/start` | Parse a free-text brief, create the project, run the free stages |
+| `GET` | `/api/films/production` | List the caller's productions and the stage definitions |
+| `GET` | `/api/films/:id/production` | Live stage board: statuses, scene counts, QC, credits, failures |
+| `POST` | `/api/films/:id/production/advance` | `{action: "generate" \| "assemble" \| "retry" \| "sync"}` |
+| `POST` | `/api/films/:id/production/cancel` | Stop the run and cancel in-flight scene jobs |
+
+Persisted in `film_productions` (one row per project, JSON stage board), added to
+the existing additive migration loop.
+
+### 5.2 Stages and gates
 
 ```
-npm test                 182 tests, 182 pass, 0 fail   (baseline was 174)
-vite build               2729 modules transformed, built in 5.05s
+analyze → screenplay → cast → locations → direct   (automatic, no spend)
+   → generate   [approval · credits]   → qc
+   → assemble   [approval · credits]   → export
+```
+
+- The brief parser derives format, runtime, genre, language and cast size
+  deterministically (no AI call), so the run is reproducible offline.
+- The screenplay stage uses the existing generator and reports honestly whether
+  the result was AI or a labelled local draft.
+- The locations stage materialises every unique on-screen setting as a real
+  `film_locations` row and links each scene to it.
+- The direction stage fills any scene without shot direction from a deterministic
+  palette, so the QC "directed scenes" check cannot be gamed.
+- Generation and assembly refuse to run unless the caller explicitly names the
+  action; both surface the underlying credit preflight (402) or provider (503)
+  error unchanged.
+
+### 5.3 Completion rule
+
+A production is marked `completed` **only** when `final_video_path` points at a
+file that exists and the export stage derives `done` from it. With no provider,
+approving generation returns `503 video_provider_unavailable`, the run becomes
+`blocked`, the failed scene numbers are listed, and export never appears.
+
+### 5.4 UI
+
+`/app/films/agent` (new entry in `FILM_PAGES`, so it appears in the studio nav,
+sitemap and mobile menu): a brief form, a live stage board, approve/retry/cancel
+actions, a QC summary and the agent's honesty rules. It polls the snapshot every
+4 s, so progress made by the background worker appears without a refresh.
+
+---
+
+## 6. Test evidence
+
+```
+npm test                 190 tests, 190 pass, 0 fail   (baseline was 174)
+npm run test:visual       12 checks, 12 pass (desktop + 390 px mobile)
+vite build               built successfully
 ```
 
 New `tests/film-director.test.js` (7 tests, real HTTP + real database):
@@ -151,14 +209,41 @@ Extended `tests/film-migration.test.js`: a pre-upgrade database gains the seven
 new scene columns and the `film_locations` table in place, without data loss,
 and the migration stays idempotent.
 
+New `tests/film-production.test.js` (8 tests, real HTTP + real database, no
+provider configured):
+
+1. the brief parser extracts runtime, format, cast size and language offline;
+2. starting a production writes the screenplay, casts, locates and directs every
+   scene, and the project exposes the same scene count the plan promised;
+3. the locations the agent creates are real rows that scenes point at, and the
+   QC locations check passes;
+4. assembly is refused before any clip exists (`409 scenes_incomplete`), and
+   approving generation without a provider fails with `503` and leaves
+   `counts.ready === 0` — no clip is invented;
+5. a production is only complete when a rendered file exists, and `sync`
+   persists `completed` with a timestamp;
+6. failed scenes are reported with their scene numbers, `canRetry` is true, and a
+   retry stays blocked rather than pretending to succeed;
+7. cancelling stops the run and further paid work returns `409
+   production_cancelled`;
+8. productions are private (403 for another user) and listed for their owner.
+
+The visual suite gained a 12th check that starts a production through the UI,
+asserts the five free stages really ran, confirms export is not offered, clicks
+"Approve scene generation", and asserts the honest provider rejection and the
+"blocked at this stage" banner — then repeats at 390 px with no horizontal
+overflow. Artifacts: `test-artifacts/film-agent-desktop.png` and
+`film-agent-blocked-desktop.png`.
+
 ---
 
-## 6. Outstanding work (honest list)
+## 7. Outstanding work (honest list)
 
 | Phase | Work | Blocking dependency |
 |---|---|---|
-| 2 | Production Agent orchestration (`POST /api/films/:id/produce`) driving screenplay → cast → locations → generate-all → QC with per-stage approval | none — buildable next |
 | 2 | Storyboard/still image studio for film (Module 4) | `OPENAI_API_KEY` or `REPLICATE_API_TOKEN` for real images |
+| 2 | Natural-language stage revision ("make scene 4 sadder") and unattended scheduled runs | none; needs design |
+| 2 | Per-scene voice preview assets (Module 6) | ElevenLabs/OpenAI TTS keys for real voices |
 | 3 | Multi-track editor + transitions (Module 10) | none in principle; FFmpeg work |
 | 3 | Per-scene voice preview and lip-sync (Module 6) | ElevenLabs/OpenAI TTS keys; lip-sync provider |
 | 4 | Motion transfer / VFX (Module 7) | third-party provider |

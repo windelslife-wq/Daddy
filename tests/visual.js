@@ -332,6 +332,40 @@ test('professional global website, themes, authentication, workspace, and respon
     }
   });
 
+  await t.test('the production agent writes a real screenplay then stops at the paid gate', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${base}/app/films/agent`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /AI Production Agent/i }).waitFor({ timeout: 15000 });
+    await page.locator('textarea[placeholder^="A 20-minute Nigerian family drama"]').fill(
+      'A 2-minute Nigerian family drama with three main characters, set in a warm Abuja apartment and a rooftop at dusk.',
+    );
+    await page.getByRole('button', { name: /Start production/i }).click();
+    await page.waitForURL(/\/app\/films\/agent\?film=/, { timeout: 30000 });
+    await page.getByText('Generate scene clips').first().waitFor({ timeout: 20000 });
+
+    // The free stages really ran: the screenplay, cast, locations and direction exist.
+    for (const label of ['Understand the brief', 'Write the screenplay', 'Cast the characters', 'Build the locations', 'Direct every shot']) {
+      await page.getByText(new RegExp(label, 'i')).first().waitFor();
+    }
+    const approve = page.getByRole('button', { name: /Approve scene generation/i });
+    await approve.waitFor({ timeout: 15000 });
+    await screenshot('film-agent-desktop.png');
+    assert.ok(!(await page.getByText(/Preview & export/i).count()), 'a production without clips must not offer export');
+    await assertNoHorizontalOverflow('film agent desktop');
+
+    // Approving with no provider configured must fail honestly and stay blocked.
+    await approve.click();
+    await page.getByText(/Real AI video generation is not configured/i).first().waitFor({ timeout: 20000 });
+    await page.getByText(/blocked at this stage/i).first().waitFor();
+    assert.ok(!(await page.getByText(/Preview & export/i).count()), 'a blocked production never claims completion');
+    await screenshot('film-agent-blocked-desktop.png');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText(/Generate scene clips/i).first().waitFor({ timeout: 15000 });
+    await assertNoHorizontalOverflow('mobile film agent');
+  });
+
   await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {
@@ -354,11 +388,19 @@ test('professional global website, themes, authentication, workspace, and respon
 
   await t.test('browser reports no uncaught page errors or unexpected failed requests', async () => {
     assert.deepEqual(pageErrors, []);
-    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
+    const expectedConsole = httpErrors.some((line) => /^503 .*\/production\/advance$/.test(line))
+      ? [/Failed to load resource: the server responded with a status of 503/i]
+      : [];
+    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message)
+      && !expectedConsole.some((pattern) => pattern.test(message)));
     assert.deepEqual(unexpectedConsoleErrors, [], `Unexpected console errors. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
     const unexpectedFailedRequests = failedRequests.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
     assert.deepEqual(unexpectedFailedRequests, [], `Unexpected failed requests. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
-    assert.deepEqual(httpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
+    // The production-agent test deliberately approves generation without a provider:
+    // the server rejects that with a documented 503 instead of fabricating a clip.
+    const honestRejections = [/^503 .*\/production\/advance$/];
+    const unexpectedHttpErrors = httpErrors.filter((line) => !honestRejections.some((pattern) => pattern.test(line)));
+    assert.deepEqual(unexpectedHttpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
     console.log(JSON.stringify({
       visualQa: 'passed',
       publicPages: PUBLIC_PAGES.length,
