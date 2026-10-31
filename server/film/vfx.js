@@ -25,7 +25,9 @@ import { listVfxPresets } from './editing.js';
 import { providerCredentials, requestedProvider, runProviderVideo } from './gatedProviders.js';
 import fs from 'node:fs/promises';
 
-export function motionStatus() {
+export async function motionStatus() {
+  const { disabledProviders } = await import('./providerGuard.js');
+  const disabled = await disabledProviders();
   const credentials = providerCredentials();
   // A provider is only usable when the operator has chosen the model explicitly.
   const explicit = String(config.film.motionProvider || '').toLowerCase();
@@ -35,25 +37,29 @@ export function motionStatus() {
   if (explicit === 'replicate' && hasReplicate) provider = 'replicate';
   else if (explicit === 'fal' && hasFal) provider = 'fal';
   else if (!explicit || explicit === 'auto') provider = hasReplicate ? 'replicate' : hasFal ? 'fal' : 'none';
+  const blockedByAdmin = provider !== 'none' && disabled.includes(provider);
   return {
     feature: 'motion_transfer',
-    provider,
-    configured: provider !== 'none',
+    provider: blockedByAdmin ? 'none' : provider,
+    configured: provider !== 'none' && !blockedByAdmin,
+    disabledByAdmin: blockedByAdmin,
     models: {
       replicate: config.film.motionReplicateModel || null,
       fal: config.film.motionFalModel || null,
     },
     localPresets: listVfxPresets(),
-    note: provider === 'none'
-      ? 'Motion transfer needs FILM_MOTION_PROVIDER, a provider credential and an explicit FILM_MOTION_*_MODEL. Local VFX presets work without any key.'
-      : 'Motion transfer is wired to the provider prediction API; live output is unverified in this environment.',
+    note: blockedByAdmin
+      ? `The ${provider} provider is disabled by an administrator; re-enable it in Admin → Film studio.`
+      : provider === 'none'
+        ? 'Motion transfer needs FILM_MOTION_PROVIDER, a provider credential and an explicit FILM_MOTION_*_MODEL. Local VFX presets work without any key.'
+        : 'Motion transfer is wired to the provider prediction API; live output is unverified in this environment.',
     verified: false,
   };
 }
 
 export async function vfxOverview() {
   return {
-    motion: motionStatus(),
+    motion: await motionStatus(),
     presets: listVfxPresets(),
     appliedAt: 'FFmpeg during assembly (local presets) / provider clip (motion transfer)',
   };
@@ -68,7 +74,7 @@ export async function sceneMotionStatus(userId, filmId, sceneId, role = 'user') 
     hasClip: Boolean(scene.clip_path && fsSync.existsSync(scene.clip_path)),
     hasStill: Boolean(scene.poster_path && fsSync.existsSync(scene.poster_path)),
     vfxPreset: scene.vfx_preset || 'none',
-    status: motionStatus(),
+    status: await motionStatus(),
   };
 }
 
@@ -78,7 +84,7 @@ export async function queueMotionTransfer(userId, filmId, sceneId, payload = {},
   if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
   const still = scene.poster_path && fsSync.existsSync(scene.poster_path) ? scene.poster_path : null;
   if (!still) throw new AppError(409, 'still_required', 'Render a storyboard still for this scene before animating it.');
-  const status = motionStatus();
+  const status = await motionStatus();
   if (!status.configured) throw new AppError(503, 'motion_transfer_unavailable', status.note);
   const motionPrompt = String(payload.motionPrompt || '').trim().slice(0, 400)
     || `Subtle cinematic camera movement, ${scene.camera_movement || 'slow push in'}, ${scene.heading || 'scene'}`;
@@ -103,7 +109,7 @@ export async function processMotionJob({ filmId, sceneId, provider, stillPath, m
   const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
   if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
   if (!stillPath || !fsSync.existsSync(stillPath)) throw new AppError(409, 'still_required', 'The source still is missing.');
-  const status = motionStatus();
+  const status = await motionStatus();
   const selected = requestedProvider(provider) || status.provider;
   if (!status.configured || selected === 'none') throw new AppError(503, 'motion_transfer_unavailable', status.note);
   const model = selected === 'replicate' ? config.film.motionReplicateModel : config.film.motionFalModel;

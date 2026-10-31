@@ -243,3 +243,5 @@
 .film-track-editor[open] > summary::before { content: '▾ '; }
 .film-track-editor[open] > summary { opacity: 1; }
 .film-track-editor .film-timeline-controls { flex-wrap: wrap; }
+.film-track-editor input[type="file"] { max-width: 100%; font-size: 11px; padding: 4px; }
+.film-brand-shot { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); }

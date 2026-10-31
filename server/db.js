@@ -540,6 +540,7 @@ export const tableDefinitions = {
     t.string('audience', 220).notNullable().defaultTo('');
     t.text('colors').notNullable().defaultTo('[]');
     t.text('logo_path');
+    t.text('product_image_path');
     t.string('created_at', 40).notNullable();
     t.string('updated_at', 40).notNullable();
   },
@@ -680,6 +681,9 @@ export async function initializeDatabase(database, options = {}) {
       vfx_preset: (t) => t.string('vfx_preset', 40).notNullable().defaultTo('none'),
       lipsync_provider: (t) => t.string('lipsync_provider', 60),
       lipsync_at: (t) => t.string('lipsync_at', 40),
+    },
+    brand_kits: {
+      product_image_path: (t) => t.text('product_image_path'),
     },
     film_characters: {
       wardrobe: (t) => t.text('wardrobe').notNullable().defaultTo(''),

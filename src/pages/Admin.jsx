@@ -142,6 +142,14 @@ export default function Admin() {
     const result = await action(() => post(`/api/admin/film/providers/${encodeURIComponent(providerId)}`, { enabled }), enabled ? 'Provider enabled.' : 'Provider disabled.');
     if (!result) return;
   }
+  const [health, setHealth] = useState(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  async function checkFilmHealth() {
+    setHealthBusy(true);
+    try { setHealth(await get('/api/admin/film/health')); }
+    catch (err) { showToast(err.message, 'error'); }
+    finally { setHealthBusy(false); }
+  }
   async function retryFilmJobs() {
     const result = await action(() => post('/api/admin/film/jobs/retry-failed', {}), 'Failed film jobs requeued.');
     if (result) showToast(`${result.requeued} job(s) back in the queue.`, 'info');
@@ -316,7 +324,7 @@ export default function Admin() {
               </Card>}
               {tab === 'film' && data?.providers && (
                 <>
-                  <Card title="Video providers" icon={Clapperboard} subtitle="Disabling a provider removes it from routing immediately — requests fail honestly with 503 instead of silently falling back." action={<Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button>}>
+                  <Card title="Video providers" icon={Clapperboard} subtitle="Disabling a provider removes it from routing immediately — requests fail honestly with 503 instead of silently falling back." action={<><Button size="sm" variant="ghost" disabled={healthBusy} onClick={checkFilmHealth}>{healthBusy ? <Spinner size={13} /> : <><Activity size={14} /> Check health</>}</Button><Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button></>}>
                     <div className="list">
                       {data.providers.video.map((provider) => (
                         <div className="list-item" key={provider.id}>
@@ -329,6 +337,19 @@ export default function Admin() {
                       ))}
                     </div>
                     {!data.providers.video.length && <EmptyState icon={Clapperboard} title="No video providers registered" description="The provider registry is empty — check server/film/videoProviders.js." />}
+                    {health && (
+                      <div className="list" style={{ marginTop: 10 }}>
+                        {health.providers.map((item) => (
+                          <div className="list-item" key={item.id}>
+                            <div className="list-main">
+                              <strong>{item.id}</strong>
+                              <small>{item.checked ? `${item.reachable ? 'reachable' : 'unreachable'}${item.status ? ` · HTTP ${item.status}` : ''} · ${item.latencyMs} ms` : item.reason}</small>
+                            </div>
+                            <span className={`status-dot ${item.checked ? (item.reachable ? 'good' : 'warn') : ''}`} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </Card>
                   <Card title="Render queue" icon={ListChecks} subtitle="Film jobs by type and status.">
                     {Object.keys(data.queue || {}).length === 0

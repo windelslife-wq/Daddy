@@ -15,7 +15,7 @@
  *    nothing is silently retried unless `autoRetry` was requested.
  */
 import { z } from 'zod';
-import { db, now, json, newId, number, parseJson } from '../db.js';
+import { db, now, json, newId, number, parseJson, addJob } from '../db.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import {
@@ -418,10 +418,14 @@ export async function productionSnapshot(userId, filmId, role = 'user') {
   const blocking = ordered.find((stage) => stage.status === 'blocked');
   const failedScenes = scenes.filter((scene) => scene.status === 'failed').map((scene) => scene.ordinal);
 
+  const scheduledJob = await db('jobs').where({ dedupe_key: `film_production_run:${filmId}` }).first();
+  const scheduledFor = scheduledJob && ['queued', 'running'].includes(scheduledJob.status) ? scheduledJob.run_at : null;
+
   let status = row.status;
   if (film.final_video_path && byId.export.status === 'done') status = 'completed';
   else if (row.error) status = 'blocked';
   else if (blocking) status = 'blocked';
+  else if (row.status === 'scheduled' && scheduledFor) status = 'scheduled';
   else if (ordered.some((stage) => stage.status === 'running')) status = 'running';
   else if (nextStage?.approval) status = 'awaiting_approval';
   if (row.status === 'cancelled') status = 'cancelled';
@@ -438,6 +442,7 @@ export async function productionSnapshot(userId, filmId, role = 'user') {
       plan: parseJson(row.plan, {}),
       options: parseJson(row.options, {}),
       retries: number(row.retries),
+      scheduledFor,
       error: row.error || null,
       failedScenes,
       counts,
@@ -471,7 +476,13 @@ function filmDetailView(film, counts = null) {
 // ---------------------------------------------------------------------------
 
 const advanceSchema = z.object({
-  action: z.enum(['generate', 'assemble', 'retry', 'sync']),
+  action: z.enum(['generate', 'assemble', 'retry', 'sync', 'schedule']),
+  runAt: z.string().min(10).max(40).optional(),
+});
+
+export const reviseSchema = z.object({
+  stage: z.enum(['screenplay']),
+  instruction: z.string().trim().min(3).max(2000),
 });
 
 /**
@@ -526,6 +537,116 @@ export async function advanceProduction(userId, filmId, input = {}, role = 'user
     await setRun(filmId, { status: snapshot.production.status });
   }
   return { production: snapshot.production };
+}
+
+/**
+ * Natural-language revision of the screenplay stage.
+ *
+ * Real revision, not a prompt preview: the screenplay is rewritten with the
+ * director's note and the cast, locations and direction are recomputed from the
+ * new scenes. It refuses once paid clips exist, because rewriting the scenes
+ * would orphan them — the honest answer is 409, not silent destruction.
+ */
+export async function reviseProduction(userId, filmId, input = {}, role = 'user') {
+  const data = reviseSchema.parse(input);
+  const row = await ownedProduction(userId, filmId, role);
+  if (!row) throw new AppError(404, 'production_not_found', 'This project has no production run.');
+  if (row.status === 'cancelled') throw new AppError(409, 'production_cancelled', 'This production was cancelled. Start a new one.');
+  const film = await ownedFilm(userId, filmId, role);
+  const withClips = await db('film_scenes').where({ film_id: filmId }).whereNotNull('clip_path').count('* as count').first();
+  if (number(withClips?.count) > 0) {
+    throw new AppError(409, 'production_locked', `${number(withClips.count)} scene(s) already have real clips. Rewriting the screenplay would orphan paid work; edit the screenplay directly or start a new production.`);
+  }
+  let stages = readStages(row);
+  stages = await setStage(filmId, stages, 'screenplay', { status: 'running', startedAt: now(), error: null });
+  const screenplay = await generateScreenplay({
+    idea: `${row.brief}\n\nDirector's revision: ${data.instruction}`,
+    type: film.type,
+    genre: film.genre,
+    language: film.language,
+    style: film.style,
+    aspectRatio: film.aspect_ratio,
+    platform: film.target_platform,
+    targetDurationSeconds: number(film.target_duration_seconds),
+    storyBible: parseJson(film.story_bible, {}),
+    characters: [],
+    allowTemplate: true,
+  });
+  await saveScreenplay(userId, filmId, screenplay, role);
+  stages = await setStage(filmId, stages, 'screenplay', {
+    status: 'done', finishedAt: now(),
+    detail: `${screenplay.scenes.length} scenes rewritten · ${screenplay.aiGenerated ? `AI (${screenplay.provider})` : 'labelled offline draft'} · revision: “${data.instruction.slice(0, 160)}”`,
+    data: { provider: screenplay.provider, aiGenerated: Boolean(screenplay.aiGenerated), scenes: screenplay.scenes.length, revision: data.instruction },
+  });
+
+  // Re-derive everything downstream of the screenplay.
+  const characters = await db('film_characters').where({ user_id: userId, film_id: filmId });
+  stages = await setStage(filmId, stages, 'cast', {
+    status: 'done', finishedAt: now(),
+    detail: `${characters.length} character profile(s) after the rewrite.`,
+    data: { characters: characters.length },
+  });
+  await setRun(filmId, { current_stage: 'locations' });
+  const locations = await buildLocations(userId, filmId);
+  stages = await setStage(filmId, stages, 'locations', {
+    status: 'done', finishedAt: now(),
+    detail: `${locations.locations} unique setting(s) after the rewrite.`,
+    data: locations,
+  });
+  const direction = await directScenes(userId, filmId);
+  stages = await setStage(filmId, stages, 'direct', {
+    status: 'done', finishedAt: now(),
+    detail: `${direction.directed} scene(s) re-directed.`,
+    data: direction,
+  });
+  await setRun(filmId, { status: 'awaiting_approval', current_stage: 'generate', error: null });
+  return {
+    revised: true,
+    stage: 'screenplay',
+    instruction: data.instruction,
+    aiGenerated: Boolean(screenplay.aiGenerated),
+    provider: screenplay.provider,
+    scenes: screenplay.scenes.length,
+    production: (await productionSnapshot(userId, filmId, role)).production,
+  };
+}
+
+/** Queue the paid generation stage for a future time (unattended run). */
+export async function scheduleProduction(userId, filmId, input = {}, role = 'user') {
+  const data = advanceSchema.parse(input);
+  if (data.action !== 'schedule') throw new AppError(400, 'invalid_action', 'Use action=schedule.');
+  const when = new Date(data.runAt || '');
+  if (Number.isNaN(when.getTime())) throw new AppError(400, 'invalid_run_at', 'runAt must be an ISO date-time.');
+  const delay = when.getTime() - Date.now();
+  if (delay < 60_000) throw new AppError(400, 'run_at_too_soon', 'Schedule generation at least a minute ahead.');
+  if (delay > 90 * 24 * 60 * 60 * 1000) throw new AppError(400, 'run_at_too_far', 'Schedule generation within 90 days.');
+  const row = await ownedProduction(userId, filmId, role);
+  if (!row) throw new AppError(404, 'production_not_found', 'This project has no production run.');
+  if (row.status === 'cancelled') throw new AppError(409, 'production_cancelled', 'This production was cancelled.');
+  const film = await ownedFilm(userId, filmId, role);
+  if (film.final_video_path) throw new AppError(409, 'production_already_rendered', 'This production already has a rendered film.');
+  const dedupeKey = `film_production_run:${filmId}`;
+  const jobId = await addJob('film_production_run', { filmId, userId, action: 'generate' }, {
+    runAt: when.toISOString(), maxAttempts: 1, dedupeKey,
+  });
+  // Re-scheduling moves the existing job instead of stacking duplicates.
+  await db('jobs').where({ dedupe_key: dedupeKey }).update({
+    run_at: when.toISOString(), status: 'queued', attempts: 0, locked_at: null, locked_by: null,
+    last_error: null, updated_at: now(),
+  });
+  await setRun(filmId, { status: 'scheduled', current_stage: 'generate', error: null });
+  return {
+    scheduled: true,
+    jobId,
+    runAt: when.toISOString(),
+    production: (await productionSnapshot(userId, filmId, role)).production,
+  };
+}
+
+/** Worker entry point for a scheduled production. */
+export async function processScheduledProduction({ userId, filmId } = {}) {
+  const result = await advanceProduction(userId, filmId, { action: 'generate' }, 'user');
+  return { ...result, scheduled: true };
 }
 
 export async function cancelProduction(userId, filmId, role = 'user') {

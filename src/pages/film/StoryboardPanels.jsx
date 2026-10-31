@@ -3,7 +3,7 @@ import {
   CheckCircle2, Clapperboard, Film as FilmIcon, Image as ImageIcon, Info, Mic2,
   RefreshCw, Save, Scissors, Sparkles, Volume2,
 } from 'lucide-react';
-import { get, post, patch } from '../../api.js';
+import { get, post, patch, api } from '../../api.js';
 import { useLoad } from '../../hooks.js';
 import {
   Button, Card, EmptyState, ErrorBanner, InfoBanner, Spinner, useToast,
@@ -220,6 +220,8 @@ export function TimelineStep({ film, reload }) {
   const scenes = film.scenes || [];
   const vfx = useLoad(() => get('/api/films/vfx'), [], { initial: null });
   const lipSync = useLoad(() => get('/api/films/lipsync'), [], { initial: null });
+  const overlays = useLoad(() => get(`/api/films/${film.id}/overlays`), [film.id], { initial: { overlays: [] } });
+  const [uploading, setUploading] = useState(false);
   const total = useMemo(() => scenes.reduce((sum, scene) => sum + Number(scene.durationSeconds || 0), 0), [scenes]);
 
   const valueFor = (scene, key) => drafts[scene.id]?.[key] ?? scene[key] ?? (key === 'transition' ? 'cut' : 0);
@@ -242,9 +244,25 @@ export function TimelineStep({ film, reload }) {
     speedFactor: scene.speedFactor || 1,
     vfxPreset: scene.vfxPreset || 'none',
     overlayText: scene.overlay?.text || '',
+    overlayId: scene.overlay?.overlayId || '',
     overlayStart: scene.overlay?.startSeconds ?? 0,
     overlayEnd: scene.overlay?.endSeconds ?? 0,
   };
+
+  async function uploadOverlay(file) {
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const body = new FormData();
+      body.append('kind', 'overlay');
+      body.append('name', file.name);
+      body.append('file', file);
+      await api(`/api/films/${film.id}/upload`, { method: 'POST', body });
+      await overlays.reload({ silent: true });
+      showToast('Overlay image uploaded. Pick it on any scene to draw it over the clip.', 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setUploading(false); }
+  }
   const setTrack = (scene, key, value) => setTracks((current) => ({ ...current, [scene.id]: { ...trackFor(scene), [key]: value } }));
 
   async function applyTrack(scene) {
@@ -254,8 +272,13 @@ export function TimelineStep({ film, reload }) {
       await post(`/api/films/${film.id}/scenes/${scene.id}/track`, {
         speedFactor: Number(track.speedFactor) || 1,
         vfxPreset: track.vfxPreset,
-        overlay: track.overlayText.trim()
-          ? { text: track.overlayText, startSeconds: Number(track.overlayStart) || 0, endSeconds: Number(track.overlayEnd) || 0 }
+        overlay: track.overlayText.trim() || track.overlayId
+          ? {
+            text: track.overlayText.trim(),
+            overlayId: track.overlayId || null,
+            startSeconds: Number(track.overlayStart) || 0,
+            endSeconds: Number(track.overlayEnd) || 0,
+          }
           : null,
       });
       await reload({ silent: true });
@@ -341,7 +364,7 @@ export function TimelineStep({ film, reload }) {
                 </Button>
               </div>
               <details className="film-track-editor" style={{ flexBasis: '100%' }}>
-                <summary>Track: speed {Number(scene.speedFactor || 1).toFixed(2)}× · {pretty(scene.vfxPreset && scene.vfxPreset !== 'none' ? scene.vfxPreset : 'no look')}{scene.overlay?.text ? ' · text overlay' : ''}</summary>
+                <summary>Track: speed {Number(scene.speedFactor || 1).toFixed(2)}× · {pretty(scene.vfxPreset && scene.vfxPreset !== 'none' ? scene.vfxPreset : 'no look')}{scene.overlay?.text ? ' · text overlay' : ''}{scene.overlay?.overlayId ? ' · image overlay' : ''}</summary>
                 <div className="film-timeline-controls" style={{ marginTop: 8 }}>
                   <label className="film-mini-field">
                     <span>Speed</span>
@@ -356,6 +379,17 @@ export function TimelineStep({ film, reload }) {
                   <label className="film-mini-field" style={{ flex: 2 }}>
                     <span>Overlay text</span>
                     <input className="input" maxLength={120} value={trackFor(scene).overlayText} placeholder="e.g. Three days later" onChange={(event) => setTrack(scene, 'overlayText', event.target.value)} />
+                  </label>
+                  <label className="film-mini-field">
+                    <span>Overlay image</span>
+                    <select className="input" value={trackFor(scene).overlayId} onChange={(event) => setTrack(scene, 'overlayId', event.target.value)}>
+                      <option value="">None</option>
+                      {(overlays.data?.overlays || []).map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="film-mini-field">
+                    <span>Upload image</span>
+                    <input className="input" type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; uploadOverlay(file); }} />
                   </label>
                   <label className="film-mini-field">
                     <span>Show from (s)</span>
@@ -376,8 +410,8 @@ export function TimelineStep({ film, reload }) {
                   </Button>
                 </div>
                 <small className="film-provider-note">
-                  Speed, look and the text overlay are burned in by FFmpeg during the next render. Lip-sync and motion transfer need a provider key;
-                  without one the server refuses with 503 and nothing changes.
+                  Speed, look, the text overlay and a picture-in-picture image are burned in by FFmpeg during the next render. Lip-sync and
+                  motion transfer need a provider key; without one the server refuses with 503 and nothing changes.
                 </small>
               </details>
             </div>

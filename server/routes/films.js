@@ -48,18 +48,19 @@ import {
 } from '../film/canvas.js';
 import { listModels } from '../film/models.js';
 import { editingOverview, updateSceneTrack, listVfxPresets } from '../film/editing.js';
+import { overlayAssetList, addOverlayAsset, deleteOverlayAsset } from '../film/overlays.js';
 import { lipSyncStatus, sceneLipSync, queueLipSync } from '../film/lipsync.js';
 import { vfxOverview, motionStatus, sceneMotionStatus, queueMotionTransfer } from '../film/vfx.js';
 import {
   listProps, createProp, updateProp, deleteProp, setSceneProps,
 } from '../film/props.js';
 import {
-  listBrandKits, upsertBrandKit, deleteBrandKit, attachBrandKit,
-  adVariants, generateAdVariations, applyAdVariant,
+  listBrandKits, upsertBrandKit, deleteBrandKit, attachBrandKit, brandKitView,
+  adVariants, generateAdVariations, applyAdVariant, generateProductShot,
 } from '../film/ads.js';
 import {
   startProduction, productionSnapshot, advanceProduction, cancelProduction,
-  listProductions, PRODUCTION_STAGES,
+  listProductions, PRODUCTION_STAGES, reviseProduction, scheduleProduction,
 } from '../film/production.js';
 import {
   seriesSchema, episodeSchema, patchEpisodeSchema, EPISODE_STATUSES,
@@ -110,7 +111,7 @@ const estimateSchema = z.object({
 });
 
 const uploadKindSchema = z.object({
-  kind: z.enum(['reference', 'music', 'character', 'sfx']),
+  kind: z.enum(['reference', 'music', 'character', 'sfx', 'overlay']),
   characterId: z.string().max(48).optional(),
   name: z.string().max(120).optional(),
 });
@@ -186,6 +187,35 @@ export function filmRouter() {
     res.json({ productions: await listProductions(req.user.id), stages: PRODUCTION_STAGES });
   }));
 
+  // ---- Audio stems ---------------------------------------------------------
+  router.get('/:id/stems', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const dir = path.join(projectDir(`film_${film.id}`), 'stems');
+    let files = [];
+    try { files = await fsp.readdir(dir); } catch { files = []; }
+    const stems = await Promise.all(files.map(async (file) => {
+      const stat = await fsp.stat(path.join(dir, file)).catch(() => null);
+      return { kind: path.basename(file, path.extname(file)), filename: file, bytes: stat?.size || 0, exists: Boolean(stat) };
+    }));
+    res.json({
+      stems,
+      available: stems.some((stem) => stem.exists),
+      note: stems.length ? 'Rendered from the last completed assembly.' : 'Render the film to export stems.',
+    });
+  }));
+
+  router.get('/:id/stems/:kind', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const kind = String(req.params.kind).toLowerCase();
+    if (!['voice', 'sfx', 'music'].includes(kind)) throw badRequest('Unknown stem. Choose voice, sfx or music.');
+    const dir = path.join(projectDir(`film_${film.id}`), 'stems');
+    const files = await fsp.readdir(dir).catch(() => []);
+    const match = files.find((file) => path.basename(file, path.extname(file)) === kind);
+    if (!match) throw notFound('That stem has not been exported yet. Render the film first.');
+    const filename = `${kind}-${film.id}${kind === 'music' ? path.extname(match) : '.wav'}`;
+    await streamFile(req, res, path.join(dir, match), filename, { download: true });
+  }));
+
   // ---- Props library (continuity) -----------------------------------------
   router.get('/props', h(async (req, res) => {
     res.json({ props: await listProps(req.user.id, { filmId: req.query.filmId }) });
@@ -216,6 +246,47 @@ export function filmRouter() {
     res.json(await deleteBrandKit(req.user.id, req.params.brandKitId));
   }));
 
+  router.post('/brand-kits/:brandKitId/logo', upload.single('file'), h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit) throw notFound('Brand kit not found.');
+    if (!req.file) throw badRequest('Choose a PNG, JPEG or WebP logo.');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(req.file.mimetype)) throw badRequest('The logo must be a PNG, JPEG or WebP image.');
+    if (req.file.size > config.film.maxReferenceImageMb * 1024 * 1024) throw badRequest(`Logos must be under ${config.film.maxReferenceImageMb} MB.`);
+    const dir = path.join(config.storageDir, 'brand-kits');
+    await fsp.mkdir(dir, { recursive: true });
+    const ext = req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+    const destination = path.join(dir, `${kit.id}.${ext}`);
+    await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    await db('brand_kits').where({ id: kit.id }).update({ logo_path: destination, updated_at: now() });
+    res.status(201).json({ uploaded: true, brandKit: brandKitView(await db('brand_kits').where({ id: kit.id }).first()) });
+  }));
+
+  router.post('/brand-kits/:brandKitId/product-shot', h(async (req, res) => {
+    res.status(201).json(await generateProductShot(req.user.id, req.params.brandKitId));
+  }));
+
+  router.get('/brand-kits/:brandKitId/product-image', h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit?.product_image_path) throw notFound('No product shot has been generated for this brand kit.');
+    await streamFile(req, res, kit.product_image_path, `product-${kit.id}.png`);
+  }));
+
+  router.get('/brand-kits/:brandKitId/logo', h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit?.logo_path) throw notFound('No logo uploaded for this brand kit.');
+    await streamFile(req, res, kit.logo_path, `brand-logo-${kit.id}${path.extname(kit.logo_path)}`);
+  }));
+
+  // ---- Overlay images (picture-in-picture tracks) --------------------------
+  router.get('/:id/overlays', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json({ overlays: await overlayAssetList(req.params.id) });
+  }));
+
+  router.delete('/:id/overlays/:overlayId', h(async (req, res) => {
+    res.json(await deleteOverlayAsset(req.user.id, req.params.id, req.params.overlayId, req.user.role));
+  }));
+
   // ---- Reusable cast library ----------------------------------------------
   router.get('/cast-library', h(async (req, res) => {
     res.json({ characters: await castLibrary(req.user.id) });
@@ -232,11 +303,11 @@ export function filmRouter() {
   }));
 
   router.get('/lipsync', h(async (req, res) => {
-    res.json(lipSyncStatus());
+    res.json(await lipSyncStatus());
   }));
 
   router.get('/motion', h(async (req, res) => {
-    res.json(motionStatus());
+    res.json(await motionStatus());
   }));
 
   // ---- Creative canvas -----------------------------------------------------
@@ -466,6 +537,14 @@ export function filmRouter() {
   // ---- Production agent (per project) --------------------------------------
   router.get('/:id/production', h(async (req, res) => {
     res.json(await productionSnapshot(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/production/schedule', h(async (req, res) => {
+    res.status(202).json(await scheduleProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/production/revise', h(async (req, res) => {
+    res.json(await reviseProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
   }));
 
   router.post('/:id/production/advance', h(async (req, res) => {
@@ -758,6 +837,14 @@ export function filmRouter() {
     const filename = `${data.kind}-${Date.now()}.${ext}`;
     const destination = path.join(dir, filename);
     await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    if (data.kind === 'overlay') {
+      const asset = await addOverlayAsset(req.user.id, film.id, {
+        name: data.name || path.basename(req.file.originalname || 'Overlay'),
+        path: destination, bytes: req.file.size,
+      }, req.user.role);
+      res.status(201).json({ uploaded: true, kind: 'overlay', asset });
+      return;
+    }
     if (data.kind === 'sfx') {
       const probe = await probeVideo(destination);
       if (!probe.durationSeconds) {

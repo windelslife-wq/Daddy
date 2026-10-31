@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowRight, CheckCircle2, Clapperboard, Coins, Info, Pause, Play,
+  ArrowRight, CheckCircle2, Clapperboard, Clock, Coins, Info, Pause, Play,
   RefreshCw, Sparkles, Square, WandSparkles,
 } from 'lucide-react';
 import { get, post, formatDate } from '../../api.js';
@@ -96,6 +96,8 @@ function RunView({ filmId }) {
   const { showToast } = useToast();
   const [pending, setPending] = useState(null);
   const [error, setError] = useState(null);
+  const [instruction, setInstruction] = useState('');
+  const [scheduleAt, setScheduleAt] = useState('');
   const { data, loading, error: loadError, reload } = useLoad(
     () => get(`/api/films/${filmId}/production`),
     [filmId],
@@ -108,6 +110,30 @@ function RunView({ filmId }) {
       await post(`/api/films/${filmId}/production/advance`, { action });
       await reload({ silent: true });
       showToast(toast, 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setPending(null); }
+  }
+
+  async function revise() {
+    if (instruction.trim().length < 3) return;
+    setPending('revise'); setError(null);
+    try {
+      const result = await post(`/api/films/${filmId}/production/revise`, { stage: 'screenplay', instruction: instruction.trim() });
+      setInstruction('');
+      await reload({ silent: true });
+      showToast(`Screenplay rewritten: ${result.scenes} scenes${result.aiGenerated ? ` (${result.provider})` : ' (labelled offline draft)'}. Cast, locations and direction rebuilt.`, 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setPending(null); }
+  }
+
+  async function schedule() {
+    if (!scheduleAt) return;
+    setPending('schedule'); setError(null);
+    try {
+      const result = await post(`/api/films/${filmId}/production/schedule`, { action: 'schedule', runAt: new Date(scheduleAt).toISOString() });
+      setScheduleAt('');
+      await reload({ silent: true });
+      showToast(`Generation scheduled for ${new Date(result.runAt).toLocaleString()}. The worker runs it unattended.`, 'success');
     } catch (err) { setError(err); showToast(err.message, 'error'); }
     finally { setPending(null); }
   }
@@ -203,6 +229,24 @@ function RunView({ filmId }) {
       </Card>
 
       <div style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
+        <Card title="Revise & schedule" subtitle="Rewrite the screenplay, or run generation later" icon={Sparkles}>
+          <div className="stack" style={{ gap: 10 }}>
+            <Field label="Revision note" hint="Rewrites the screenplay with your note, then rebuilds cast, locations and direction. Refused once clips exist.">
+              <textarea className="input" rows={3} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Make scene 3 more tense and shorten the opening." />
+            </Field>
+            <Button size="sm" variant="secondary" onClick={revise} disabled={pending === 'revise' || instruction.trim().length < 3}>
+              {pending === 'revise' ? <Spinner size={13} /> : <><RefreshCw size={13} /> Revise screenplay</>}
+            </Button>
+            <Field label="Schedule generation" hint="Queues the paid generation stage for a future time; the worker runs it unattended.">
+              <input className="input" type="datetime-local" value={scheduleAt} onChange={(event) => setScheduleAt(event.target.value)} />
+            </Field>
+            <Button size="sm" variant="ghost" onClick={schedule} disabled={pending === 'schedule' || !scheduleAt}>
+              {pending === 'schedule' ? <Spinner size={13} /> : <><Clock size={13} /> Schedule generation</>}
+            </Button>
+            {run.scheduledFor && <p className="film-provider-note">Scheduled for {new Date(run.scheduledFor).toLocaleString()}.</p>}
+          </div>
+        </Card>
+
         <Card title="Continuity & quality" subtitle="Run automatically once every clip exists" icon={CheckCircle2}>
           {!run.qc
             ? <div className="film-empty-mini">QC runs when all scenes have real clips ({run.counts.ready}/{run.counts.total} ready).</div>

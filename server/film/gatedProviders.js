@@ -16,9 +16,22 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { disabledProviders } from './providerGuard.js';
 
 const MAX_INLINE_BYTES = 8 * 1024 * 1024;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Same API roots as the video adapters, including the documented
+ * `REPLICATE_API_ROOT` / `FAL_API_ROOT` overrides used by the integration tests
+ * and approved enterprise gateways.
+ */
+function roots() {
+  return {
+    replicate: process.env.REPLICATE_API_ROOT || 'https://api.replicate.com',
+    fal: process.env.FAL_API_ROOT || 'https://fal.run',
+  };
+}
 
 export function providerCredentials() {
   return {
@@ -38,16 +51,21 @@ export function requestedProvider(preferred) {
   return null;
 }
 
-export function providerStatus({ feature, envProvider, models }) {
-  const provider = requestedProvider(envProvider);
+export async function providerStatus({ feature, envProvider, models }) {
+  const disabled = await disabledProviders();
+  const candidate = requestedProvider(envProvider);
+  const provider = candidate && !disabled.includes(candidate) ? candidate : null;
   return {
     feature,
     provider: provider || 'none',
     configured: Boolean(provider),
+    disabledByAdmin: Boolean(candidate && disabled.includes(candidate)),
     models,
     note: provider
       ? 'Credential found. Calls go to the provider prediction API; this environment could not exercise a live call.'
-      : `No ${feature.replace(/_/g, ' ')} provider credential. Set FILM_LIPSYNC_PROVIDER/FILM_MOTION_PROVIDER plus REPLICATE_API_TOKEN or FAL_API_KEY.`,
+      : candidate && disabled.includes(candidate)
+        ? `The ${candidate} provider is disabled by an administrator; re-enable it in Admin → Film studio.`
+        : `No ${feature.replace(/_/g, ' ')} provider credential. Set FILM_LIPSYNC_PROVIDER/FILM_MOTION_PROVIDER plus REPLICATE_API_TOKEN or FAL_API_KEY.`,
     verified: false,
   };
 }
@@ -67,7 +85,7 @@ export async function inlineVideo(filePath) { return fileToDataUri(filePath, 'vi
 export async function inlineAudio(filePath) { return fileToDataUri(filePath, 'audio/wav'); }
 
 async function replicateCreate({ model, input, token }) {
-  const response = await fetch('https://api.replicate.com/v1/predictions', {
+  const response = await fetch(`${roots().replicate}/v1/predictions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Prefer: 'wait=60' },
     body: JSON.stringify({ model, input }),
@@ -83,7 +101,7 @@ async function replicatePoll(prediction, token, { timeoutMs = 20 * 60 * 1000 } =
   while (current?.status && ['starting', 'processing'].includes(current.status)) {
     if (Date.now() - started > timeoutMs) throw new Error('Provider prediction timed out.');
     await sleep(4000);
-    const response = await fetch(current.urls?.get || `https://api.replicate.com/v1/predictions/${current.id}`, {
+    const response = await fetch(current.urls?.get || `${roots().replicate}/v1/predictions/${current.id}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     current = await response.json();
@@ -95,7 +113,7 @@ async function replicatePoll(prediction, token, { timeoutMs = 20 * 60 * 1000 } =
 }
 
 async function falRun({ model, input, token }) {
-  const response = await fetch(`https://fal.run/${model}`, {
+  const response = await fetch(`${roots().fal}/${model}`, {
     method: 'POST',
     headers: { Authorization: `Key ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(input),

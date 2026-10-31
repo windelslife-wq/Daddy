@@ -57,10 +57,10 @@ coverage is incomplete; **MISSING** = no working implementation.
 | 5 | Video Generation Studio | PARTIAL — text/image-to-video through 3 providers, durations, aspect ratios, cancel | **DONE (bounded)** — per-scene provider choice, admin enable/disable that actually enforces routing, queue + retry, and honest 503/409 refusals; every clip is probed before it is accepted | First/last-frame conditioning, native video-to-video, clip extension, cost-aware automatic fallback |
 | 6 | Voice & Lipsync Studio | PARTIAL — per-character voice preset; dialogue voiced at assembly by mespeak/OpenAI/ElevenLabs | **PARTIAL+** — per-scene WAV takes, background batch recording (`film_voice_batch` job), and a real lip-sync path: `POST /:id/scenes/:sceneId/lipsync` requires a clip **and** a voice take, then queues `film_lipsync` against Replicate/fal | No key is configured here, so lip-sync answers 503 `lip_sync_unavailable` and is **unverified live**; voice cloning and dubbing are not implemented |
 | 7 | Motion Transfer & VFX | MISSING | **DONE (local) + GATED (motion)** — eight real FFmpeg looks (vignette, grain, soft focus, punch-in, slow zoom, handheld, letterbox, none) applied during assembly, plus `POST /:id/scenes/:sceneId/motion` which animates a storyboard still through a configured provider | Motion transfer needs `FILM_MOTION_PROVIDER` + key + explicit model id → 503 `motion_transfer_unavailable`; no pose transfer, background substitution or frame interpolation |
-| 8 | Marketing & Ad Studio | MISSING | **DONE (bounded)** — per-user brand kits (`brand_kits`), product/audience/colour intake, brand clause injected into prompts, three to five distinct creative angles written by the screenplay engine, and one-click apply that rewrites the project's scenes | Product photography, logo compositing and ad-account delivery are not implemented; generated variations are labelled `AI` or `template` |
+| 8 | Marketing & Ad Studio | MISSING | **DONE (bounded)** — per-user brand kits (`brand_kits`), product/audience/colour intake, brand clause injected into prompts, three to five distinct creative angles written by the screenplay engine, one-click apply that rewrites the project's scenes, **logo upload + FFmpeg logo compositing** into the finished advertisement, and **product shots** from the configured image provider (labelled non-AI with the local renderer) | Ad-account delivery is not implemented; generated variations are labelled `AI` or `template` |
 | 9 | Creative Canvas | MISSING | **DONE (bounded)** — persisted node flows over text, screenplay, image, voice and credit-metered scene nodes, with dependency order, cycle rejection and per-node run logs | More node types, branching, per-node retry and cost preview |
-| 10 | Movie Editing Studio | PARTIAL — reorder, edit prompts/dialogue, regenerate, subtitles, music, SFX, render | **DONE (bounded multi-track)** — trims, fades, scene split, **speed ramps 0.25×–4×**, **eight VFX looks**, **timed text overlays** (`drawtext`), ducked score, SFX and burned subtitles, all applied by FFmpeg at render time and verified by a real MP4 render in tests | Picture-in-picture images, keyframed animation, separate music stems, frame-accurate scrubbing |
-| 11 | Production Agent | MISSING | **DONE (orchestrator)** — one brief drives analyse → screenplay → cast → locations → direction, stops at a credit-spending gate, then generation → QC → assembly → export, with retry and cancel | Natural-language revision of a finished stage, scheduled/unattended runs, per-run concurrency caps |
+| 10 | Movie Editing Studio | PARTIAL — reorder, edit prompts/dialogue, regenerate, subtitles, music, SFX, render | **DONE (bounded multi-track)** — trims, fades, scene split, **speed ramps 0.25×–4×**, **eight VFX looks**, **timed text overlays** (`drawtext`), **picture-in-picture image overlays**, ducked score, SFX, burned subtitles and **exported audio stems** (voice / SFX / music), all applied by FFmpeg at render time and verified by real MP4 renders and pixel samples in tests | Keyframed animation, frame-accurate scrubbing |
+| 11 | Production Agent | MISSING | **DONE (orchestrator)** — one brief drives analyse → screenplay → cast → locations → direction, stops at a credit-spending gate, then generation → QC → assembly → export, with retry and cancel, **natural-language screenplay revision** (rebuilds cast/locations/direction) and **scheduled unattended generation** | Per-run concurrency caps; revisions of stages other than the screenplay are done in the workspace editors |
 | 12 | Model Marketplace | PARTIAL — static provider catalogue, encrypted server-side keys, admin activation | **DONE (registry + readiness + admin controls)** — live per-model readiness, limits, capabilities and credit price; `provider_settings` + `resolveEnabledVideoProvider()` make admin enable/disable enforce routing; admin **Film studio** tab shows queue health, failed jobs with requeue, production snapshot and provider switches | Health polling and automatic cost-aware fallback are not implemented |
 
 **Continuity engine** (brief §5): PARTIAL → **DONE (bounded)**. Project/series
@@ -329,10 +329,61 @@ All of it uses the existing cards, buttons, grid and nav — no homepage restyle
 
 ---
 
+## 6.10 Delivery pass — overlays, stems, logo, revision and scheduling
+
+The last set of gaps was closed with features that can be verified entirely on
+this machine (no provider key needed), because they are FFmpeg or database work:
+
+- **Picture-in-picture overlays.** Owners upload images with
+  `POST /api/films/:id/upload` (`kind=overlay`); they are registered in
+  `metadata.overlayAssets` and listed by `GET /api/films/:id/overlays`. A scene
+  track can reference an overlay by **id** (never a path), with corner position,
+  scale, opacity and a time window. `assembly.js` builds a real
+  `filter_complex` (`scale → format=rgba → colorchannelmixer → overlay`), so the
+  image is in the MP4 — the test samples the rendered pixel and asserts the warm
+  overlay colour against the navy scene. Deleting an asset clears every scene
+  reference first, so a render can never point at a missing file.
+- **Brand logo compositing.** `POST /api/films/brand-kits/:id/logo` stores a logo
+  privately; assembly burns it into the bottom-right of the finished cut for any
+  project with that kit attached (`brandLogo: true` in the render result). A logo
+  failure is logged and the clean cut is kept rather than failing the render.
+- **Audio stems.** Assembly now builds dialogue, SFX and music as three separate
+  tracks and publishes `stems/voice.wav`, `stems/sfx.wav` and
+  `stems/music.<ext>` next to the final cut. `GET /api/films/:id/stems` lists
+  them and `GET /api/films/:id/stems/:kind` downloads one (verified RIFF/WAV).
+- **Natural-language revision.** `POST /api/films/:id/production/revise`
+  rewrites the screenplay from a director's note, then rebuilds cast, locations
+  and direction, and returns the recomputed stage board. It refuses with 409
+  `production_locked` once paid clips exist instead of orphaning them.
+- **Scheduled unattended runs.** `POST /api/films/:id/production/schedule`
+  queues `film_production_run` at a future time (dedupe key per project, so
+  re-scheduling moves the same job). The snapshot reports `scheduled` and
+  `scheduledFor`; the worker performs the same approval-gated generation.
+- **Product shots.** `POST /api/films/brand-kits/:id/product-shot` generates a
+  square product image from the kit's own copy with the configured image
+  provider and stores it next to the logo (`GET .../product-image`). Offline it
+  is the procedural renderer, reported as `aiGenerated: false`.
+- **Provider health.** `GET /api/admin/film/health` contacts only providers that
+  have credentials (Replicate account endpoint, fal root, Veo model list) with a
+  4s timeout and reports status/latency, or `checked: false` with the reason. The
+  admin Film studio tab has a **Check health** button.
+
+The lip-sync and motion-transfer transports are additionally verified against a
+local wire-protocol double (`tests/film-gated-providers.test.js`): the double
+receives the data-URI payloads, the code polls, downloads the MP4, probes it and
+replaces the scene clip. Live vendor calls remain unverified — that needs a real
+key, not code.
+
+UI: the timeline track editor gains an overlay-image picker and upload; Ad Studio
+gains logo upload per brand kit; the production agent gains a revision note and a
+schedule control.
+
+---
+
 ## 7. Test evidence
 
 ```
-npm test                 210 tests, 210 pass, 0 fail   (baseline was 174)
+npm test                 220 tests, 220 pass, 0 fail   (baseline was 174)
 npm run test:visual       13 checks, 13 pass (desktop + 390 px mobile)
 vite build               built successfully
 ```
@@ -355,6 +406,29 @@ real FFmpeg renders, no provider key):
    `film_voice_batch` jobs and return 202;
 10. `/api/admin/film/ops` is admin-only, provider toggles take effect, unknown
     provider → 404, bad payload → 400, failed-job requeue reports a count.
+
+New `tests/film-delivery.test.js` (6 tests, real HTTP, real DB, real renders):
+
+1. an overlay uploads and lists, an unknown overlay id is rejected (400);
+2. the render draws the picture-in-picture image (**pixel-sampled** from the
+   MP4), exports voice/SFX stems (RIFF headers checked) and downloads them;
+3. deleting an overlay clears the scene reference and the asset list;
+4. a brand logo uploads, streams back, and the 9:16 advertisement render reports
+   `brandLogo: true` at 720×1280;
+5. the production agent rewrites the screenplay from a note and rebuilds cast,
+   locations and direction;
+6. a brand kit generates a real square product PNG (labelled non-AI offline);
+7. generation can be scheduled (202 + queued `film_production_run` job), bad and
+   too-soon times are rejected (400), and re-scheduling moves one job.
+
+New `tests/film-gated-providers.test.js` (3 tests, local provider double):
+
+1. lip-sync sends the video and voice data URIs with the model id, polls,
+   downloads the result, probes it and replaces the clip;
+2. motion transfer does the same from the storyboard still with the motion
+   prompt, and the clip changes;
+3. an admin disabling the provider makes lip-sync/motion report
+   `disabledByAdmin`, answer 503 and change nothing; re-enabling restores 202.
 
 New `tests/film-studio-panels.test.js` (9 tests, real HTTP + files on disk):
 
@@ -422,12 +496,11 @@ overflow. Artifacts: `test-artifacts/film-agent-desktop.png` and
 | Live AI stills, natural voices, real clips | implemented, **unverified here** | `OPENAI_API_KEY` / `REPLICATE_API_TOKEN` / `ELEVENLABS_API_KEY` / `FAL_API_KEY`; this sandbox has no egress to those hosts |
 | Lip-sync against a real provider | implemented (queued job, data-URI upload, MP4 download, probe, clip replacement) | provider key **and** `FILM_LIPSYNC_REPLICATE_MODEL` / `FILM_FAL_LIPSYNC_MODEL`; 503 until then |
 | Motion transfer (video-to-video) | implemented | provider key **and** `FILM_MOTION_REPLICATE_MODEL` / `FILM_MOTION_FAL_MODEL`; 503 until then |
-| Picture-in-picture image overlays, keyframed animation, separate music stems | **not implemented** and not offered as controls | design + FFmpeg compositing work |
-| Product photography, logo compositing, ad-account delivery | **not implemented** | image model + publishing integrations |
+| Keyframed animation, frame-accurate scrubbing | **not implemented** and not offered as controls | design + FFmpeg compositing work |
+| Ad-account delivery | **not implemented** | publishing integrations |
 | Pose library, character morphing | **not implemented** | image model |
 | First/last-frame video conditioning, clip extension | **not implemented** | provider support + capability routing |
-| Natural-language revision of a finished stage, unattended scheduled runs | **not implemented** | design |
-| Health polling and automatic cost-aware provider fallback | **not implemented** | provider accounts and pricing decisions |
+| Automatic cost-aware provider fallback | **not implemented** | provider accounts and pricing decisions |
 | Native mobile apps, credit packs | out of scope | documented in `docs/FILMMAKING.md` |
 
 Verified in this environment (see §7): a two-scene film **renders a real MP4** with

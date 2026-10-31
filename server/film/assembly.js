@@ -32,7 +32,8 @@ import {
   dimensionsFor, concatEscape, writeSrt, formatFfmpegDuration,
 } from '../media/utils.js';
 import { synthesizeScene, readWav, writeWav, resamplePcm, activeTtsProvider } from '../media/audio.js';
-import { editFilters, sceneOverlay } from './editing.js';
+import { editFilters, sceneOverlay, overlayImageFilter } from './editing.js';
+import { overlayAssetMap } from './overlays.js';
 
 const SAMPLE_RATE = 24000;
 const FPS = 24;
@@ -140,12 +141,28 @@ async function normaliseClip(clipPath, outputPath, durationSeconds, width, heigh
     ...fades,
     'format=yuv420p',
   ].join(',');
-  await ffmpegWithProgress([
-    ...(trimStart > 0 ? ['-ss', formatFfmpegDuration(trimStart)] : []),
-    '-i', clipPath, '-vf', filter, '-an',
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
-    '-r', String(FPS), '-movflags', '+faststart', outputPath,
-  ], { durationSeconds, onProgress });
+  const overlay = edit.scene ? sceneOverlay(edit.scene) : null;
+  const overlayImage = overlay?.overlayId ? edit.overlayImage : null;
+  const encode = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    '-r', String(FPS), '-movflags', '+faststart', outputPath];
+  if (overlayImage) {
+    // Picture-in-picture: second input is the owner's overlay image, looped and
+    // scaled over the scene for the overlay window. The base chain is unchanged,
+    // so the concat downstream still gets one identical canvas per scene.
+    const complex = `[0:v]${filter}[bg];${overlayImageFilter({ overlay, width, height, visible })}`;
+    await ffmpegWithProgress([
+      ...(trimStart > 0 ? ['-ss', formatFfmpegDuration(trimStart)] : []),
+      '-i', clipPath, '-loop', '1', '-i', overlayImage,
+      '-filter_complex', complex, '-map', '[vout]', '-an', '-t', duration,
+      ...encode,
+    ], { durationSeconds, onProgress });
+  } else {
+    await ffmpegWithProgress([
+      ...(trimStart > 0 ? ['-ss', formatFfmpegDuration(trimStart)] : []),
+      '-i', clipPath, '-vf', filter, '-an',
+      ...encode,
+    ], { durationSeconds, onProgress });
+  }
   return outputPath;
 }
 
@@ -164,6 +181,10 @@ async function buildSceneAudio({
 }) {
   const totalSamples = Math.max(1, Math.round(sceneDuration * SAMPLE_RATE));
   const track = new Int16Array(totalSamples);
+  // Separate stems: dialogue and sound effects are mixed into `track` for the
+  // film, and also kept apart so the director can export them individually.
+  const voiceTrack = new Int16Array(totalSamples);
+  const sfxTrack = new Int16Array(totalSamples);
   const lines = sceneDialogue(scene).filter((line) => line?.line);
   const slot = lines.length ? sceneDuration / lines.length : sceneDuration;
   let ttsCharacters = 0;
@@ -188,6 +209,7 @@ async function buildSceneAudio({
       const startSample = Math.floor(l * slot * SAMPLE_RATE);
       for (let s = 0; s < fitted.length && startSample + s < totalSamples; s += 1) {
         track[startSample + s] = clip16(track[startSample + s] + fitted[s] * 0.95);
+        voiceTrack[startSample + s] = clip16(voiceTrack[startSample + s] + fitted[s] * 0.95);
       }
     } catch (error) {
       // A TTS provider failure must not silently produce a silent film.
@@ -212,6 +234,7 @@ async function buildSceneAudio({
       const startSample = Math.floor(at * SAMPLE_RATE);
       for (let s = 0; s < pcm.length && startSample + s < totalSamples; s += 1) {
         track[startSample + s] = clip16(track[startSample + s] + pcm[s] * gain);
+        sfxTrack[startSample + s] = clip16(sfxTrack[startSample + s] + pcm[s] * gain);
       }
       sfxUsed += 1;
     } catch (error) {
@@ -219,7 +242,12 @@ async function buildSceneAudio({
     }
   }
 
-  return { pcm: Buffer.from(track.buffer, track.byteOffset, track.byteLength), ttsCharacters, voices, sfxUsed };
+  return {
+    pcm: Buffer.from(track.buffer, track.byteOffset, track.byteLength),
+    voicePcm: Buffer.from(voiceTrack.buffer, voiceTrack.byteOffset, voiceTrack.byteLength),
+    sfxPcm: Buffer.from(sfxTrack.buffer, sfxTrack.byteOffset, sfxTrack.byteLength),
+    ttsCharacters, voices, sfxUsed,
+  };
 }
 
 async function readAudioPcm(filePath) {
@@ -287,6 +315,8 @@ export async function assembleFilm(filmId, {
   let voices = 0;
   let sfxUsed = 0;
 
+  const overlayAssets = await overlayAssetMap(filmId);
+
   // 1. Normalise every clip once to a single canvas/fps/duration.
   await onProgress(4, 'preparing');
   const normalised = [];
@@ -298,14 +328,21 @@ export async function assembleFilm(filmId, {
     await normaliseClip(scene.clip_path, output, sceneSeconds, width, height, (ratio) => {
       const overall = 4 + ((i + ratio) / scenes.length) * 48;
       onProgress(Math.round(Math.min(52, overall)), 'normalising_clips').catch(() => {});
-    }, { trimStart: scene.trim_start, trimEnd: scene.trim_end, transition: scene.transition, scene });
+    }, {
+      trimStart: scene.trim_start, trimEnd: scene.trim_end, transition: scene.transition, scene,
+      overlayImage: overlayAssets.get(sceneOverlay(scene)?.overlayId)?.path || null,
+    });
     normalised.push(output);
     await onProgress(Math.round(4 + ((i + 1) / scenes.length) * 48), 'normalising_clips');
   }
 
   // 2. Build the soundtrack scene by scene into one raw PCM file.
   const rawAudioPath = path.join(workDir, 'voice.raw');
+  const rawVoicePath = path.join(workDir, 'voice-stem.raw');
+  const rawSfxPath = path.join(workDir, 'sfx-stem.raw');
   const rawHandle = await fs.open(rawAudioPath, 'w');
+  const voiceHandle = await fs.open(rawVoicePath, 'w');
+  const sfxHandle = await fs.open(rawSfxPath, 'w');
   let offsetSeconds = 0;
   try {
     for (let i = 0; i < scenes.length; i += 1) {
@@ -318,6 +355,8 @@ export async function assembleFilm(filmId, {
         subtitleFrames, sceneStart: offsetSeconds,
       });
       await rawHandle.write(built.pcm);
+      await voiceHandle.write(built.voicePcm);
+      await sfxHandle.write(built.sfxPcm);
       ttsCharacters += built.ttsCharacters;
       voices += built.voices;
       sfxUsed += built.sfxUsed;
@@ -326,9 +365,22 @@ export async function assembleFilm(filmId, {
     }
   } finally {
     await rawHandle.close();
+    await voiceHandle.close();
+    await sfxHandle.close();
   }
   const voicePath = path.join(workDir, 'voice.wav');
   await ffmpeg(['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', '1', '-i', rawAudioPath, '-c:a', 'pcm_s16le', voicePath]);
+
+  // Stems are published next to the final cut so they survive the work-dir wipe.
+  const stemDir = path.join(dir, 'stems');
+  await fs.mkdir(stemDir, { recursive: true });
+  await ffmpeg(['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', '1', '-i', rawVoicePath, '-c:a', 'pcm_s16le', path.join(stemDir, 'voice.wav')]);
+  await ffmpeg(['-f', 's16le', '-ar', String(SAMPLE_RATE), '-ac', '1', '-i', rawSfxPath, '-c:a', 'pcm_s16le', path.join(stemDir, 'sfx.wav')]);
+  if (film.music_path && fsSync.existsSync(film.music_path)) {
+    await fs.copyFile(film.music_path, path.join(stemDir, `music${path.extname(film.music_path) || '.mp3'}`));
+  } else {
+    await fs.rm(path.join(stemDir, 'music.mp3'), { force: true }).catch(() => {});
+  }
   const srtPath = path.join(dir, 'film-subtitles.srt');
   await writeSrt(subtitles === false ? [] : subtitleFrames, srtPath);
   if (shouldCancel()) throw cancelledError();
@@ -395,7 +447,36 @@ export async function assembleFilm(filmId, {
     await onProgress(90, 'music');
   }
 
-  // 5. Subtitles: burn in short films, soft-track longer ones (no full re-encode).
+  // 5. Brand logo: an advertisement project with a brand-kit logo gets it burned
+  //    into the corner of the finished cut, once, so every frame carries it.
+  let logoBurned = false;
+  if (film.brand_kit_id) {
+    const kit = await db('brand_kits').where({ id: film.brand_kit_id }).first();
+    if (kit?.logo_path && fsSync.existsSync(kit.logo_path)) {
+      const brandedPath = path.join(workDir, 'branded.mp4');
+      const logoWidth = Math.max(2, Math.round((width * 0.16) / 2) * 2);
+      const margin = Math.round(width * 0.025);
+      try {
+        await ffmpegWithProgress([
+          '-i', mixedPath, '-loop', '1', '-i', kit.logo_path,
+          '-filter_complex', `[1:v]scale=${logoWidth}:-2,format=rgba,colorchannelmixer=aa=0.92[lg];[0:v][lg]overlay=W-w-${margin}:H-h-${margin}[v]`,
+          '-map', '[v]', '-map', '0:a:0',
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-r', String(FPS),
+          '-c:a', 'copy', '-t', formatFfmpegDuration(duration), '-movflags', '+faststart', brandedPath,
+        ], { durationSeconds: duration, shouldCancel });
+        if (mixedPath !== basePath) await fs.rm(mixedPath, { force: true });
+        mixedPath = brandedPath;
+        logoBurned = true;
+        await onProgress(92, 'brand_logo');
+      } catch (error) {
+        if (shouldCancel()) throw cancelledError();
+        // A logo is decorative: log and keep the clean cut rather than fail a render.
+        logger.warn({ err: { message: error.message } }, 'Brand logo overlay failed; rendering without it');
+      }
+    }
+  }
+
+  // 6. Subtitles: burn in short films, soft-track longer ones (no full re-encode).
   // The output is staged inside the work directory and published atomically, so
   // a cancelled or failed render can never truncate a previous finished cut.
   const stagedPath = path.join(workDir, 'final.mp4');
@@ -453,6 +534,8 @@ export async function assembleFilm(filmId, {
     durationSeconds: Math.round(duration), bytes: stat.size,
     scenes: scenes.length, segments: segments.length,
     subtitles: wantsSubtitles ? (burn ? 'burned-in' : 'soft-track') : 'none',
+    brandLogo: logoBurned,
+    stems: fsSync.existsSync(stemDir) ? (await fs.readdir(stemDir)).sort() : [],
     ttsProvider: pre.ttsProvider, ttsCharacters, voices, sfxUsed,
     width, height, fps: FPS,
   };

@@ -417,6 +417,14 @@ test('admin film operations are admin-only and disabling a provider blocks routi
   const opsRestored = await request('/api/admin/film/ops', { cookie: adminCookie });
   assert.ok(!opsRestored.data.providers.disabled.includes('replicate'));
 
+  const health = await request('/api/admin/film/health', { cookie: adminCookie });
+  assert.equal(health.status, 200, JSON.stringify(health.data));
+  assert.ok(Array.isArray(health.data.providers) && health.data.providers.length >= 3);
+  const replicate = health.data.providers.find((item) => item.id === 'replicate');
+  assert.equal(replicate.checked, false, 'no credential ⇒ not contacted');
+  assert.match(replicate.reason, /credential/i);
+  assert.equal((await req('/api/admin/film/health')).status, 403);
+
   const retry = await request('/api/admin/film/jobs/retry-failed', { method: 'POST', cookie: adminCookie, body: {} });
   assert.equal(retry.status, 200);
   assert.equal(typeof retry.data.requeued, 'number');

@@ -332,7 +332,7 @@ Routes (all under the existing authenticated `/app` shell, same brand, themes an
 
 `/app/films` hub · `/short` · `/long` · `/series` · `/agent` · `/canvas` · `/ads` · `/models` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|locations|storyboard|scenes|voice|timeline|render|preview`.
 
-**Ad Studio** (`/app/films/ads`) manages reusable brand kits and attaches one to an advertisement project, then writes and applies creative angles. **Timeline** rows carry a collapsible track editor (speed 0.25×–4×, one of eight FFmpeg looks, timed text overlay, split point) whose values are burned in by FFmpeg at render time. Admin accounts get a **Film studio** tab in `/app/admin` with provider switches, queue counts, failed-job requeue and a production snapshot.
+**Ad Studio** (`/app/films/ads`) manages reusable brand kits — including a logo upload that is burned into the finished advertisement — attaches one to an advertisement project, then writes and applies creative angles. **Timeline** rows carry a collapsible track editor (speed 0.25×–4×, one of eight FFmpeg looks, timed text overlay, picture-in-picture image overlay, split point) whose values are burned in by FFmpeg at render time. The **production agent** can rewrite the screenplay from a natural-language note and schedule the paid generation stage for an unattended run. Admin accounts get a **Film studio** tab in `/app/admin` with provider switches, queue counts, failed-job requeue and a production snapshot.
 
 The project workspace is a ten-step resumable wizard (setup, screenplay, cast, locations, storyboard, direct & generate, voice, timeline, assemble, preview). Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
 
@@ -341,6 +341,40 @@ The project workspace is a ten-step resumable wizard (setup, screenplay, cast, l
 - The app is a responsive **installable PWA** (`/manifest.webmanifest`, `/sw.js`, 192/512/maskable icons, standalone display, iOS meta tags). On Android it can be installed from Chrome; on iOS it can be added to the Home Screen from Safari. It works on phones and tablets with the same account and data.
 - The service worker caches only the app shell and static assets. **API responses, media and authenticated state are never cached**, so credits, jobs and videos always reflect the server.
 - **Native App Store / Play Store binaries are not implemented.** Store-ready native wrappers (Capacitor/React Native), push notifications, in-app purchases, signing and store review are a separate phase. Do not claim native apps exist.
+
+---
+
+### Delivery assets: overlays, stems, logos and scheduling
+
+- **Picture-in-picture overlays**: upload an image per project
+  (`POST /api/films/:id/upload` with `kind=overlay`, PNG/JPEG/WebP) and pick it on
+  any scene in the timeline. The scene stores the asset **id**; FFmpeg draws it
+  with the chosen corner, scale (10–60% of frame width), opacity and time window.
+  `GET /api/films/:id/overlays` lists assets, `DELETE` removes one and clears the
+  scenes that referenced it.
+- **Brand logos**: `POST /api/films/brand-kits/:id/logo`, streamed back with
+  `GET /api/films/brand-kits/:id/logo`. Any project with that kit attached gets
+  the logo burned into the bottom-right of the final MP4; the render result
+  reports `brandLogo: true`.
+- **Audio stems**: every completed render publishes `stems/voice.wav`,
+  `stems/sfx.wav` and `stems/music.<ext>` next to `final.mp4`.
+  `GET /api/films/:id/stems` lists them with byte sizes and
+  `GET /api/films/:id/stems/:kind` downloads one.
+- **Revision**: `POST /api/films/:id/production/revise` with
+  `{ stage: "screenplay", instruction }` rewrites the screenplay and rebuilds the
+  cast, locations and direction. It refuses (409 `production_locked`) once clips
+  exist, so paid work is never orphaned.
+- **Product shots**: `POST /api/films/brand-kits/:id/product-shot` generates a
+  square product image from the kit copy with the configured image provider
+  (`GET /api/films/brand-kits/:id/product-image`). With only the local renderer
+  the response says `aiGenerated: false`.
+- **Provider health**: `GET /api/admin/film/health` (admin) contacts only
+  providers with credentials, with a 4s timeout, and reports reachability and
+  latency — or `checked: false` and why. The admin Film studio tab has the button.
+- **Scheduled runs**: `POST /api/films/:id/production/schedule` with
+  `{ action: "schedule", runAt }` queues a `film_production_run` job at least a
+  minute and at most 90 days ahead. The worker executes the same approval-gated
+  generation; `WORKER_ENABLED=true` is required for it to run.
 
 ---
 
@@ -369,8 +403,8 @@ This application is plumbing; **you are responsible for the rights to what you g
 | Background music | Your own licensed upload, or a separately licensed music API. |
 | Publishing to social networks | Existing official OAuth apps, connected accounts, public HTTPS origin, provider app review. Publishing a film only marks it published locally; it does not silently post to networks. |
 | Motion transfer (animate a still) | `FILM_MOTION_PROVIDER` + credential + explicit `FILM_MOTION_REPLICATE_MODEL`/`FILM_MOTION_FAL_MODEL`; 503 until configured. |
-| Product photography, logo compositing, ad delivery | Image model plus the existing publishing integrations. |
-| Picture-in-picture image tracks, keyframed animation, separate music stems | Not implemented — not offered as controls. |
+| Ad-account delivery | The existing publishing integrations. |
+| Keyframed animation, frame-accurate scrubbing | Not implemented — not offered as controls. |
 | Purchasable credit packs | Stripe Price IDs + webhook → `credit_grant` ledger integration. |
 | Native Android/iOS store apps | Separate native-wrapper project and store review. |
 | Multi-node storage | Shared object storage / PostgreSQL for `STORAGE_DIR` clips; current default is local disk + SQLite. |
@@ -444,6 +478,10 @@ npm test                 # includes filmmaking, film-providers, film-longform an
 npm run build
 npm run setup -- --check # overall configuration status
 ```
+
+`tests/film-gated-providers.test.js` (3 tests) runs lip-sync and motion transfer against a local wire-protocol double: it asserts the data-URI payloads and model ids, the poll/download/probe/replace cycle, and that an admin-disabled provider blocks both.
+
+`tests/film-delivery.test.js` (7 tests) covers overlay upload and rejection, a pixel-verified picture-in-picture render, exported WAV stems, logo compositing into a 9:16 advertisement, screenplay revision from a note, and scheduled runs (including re-scheduling moving one job).
 
 `tests/film-postproduction.test.js` (10 tests) covers props continuity, multi-track edits, all eight VFX presets rendered with FFmpeg, a **real two-scene MP4** with the edit burned in, the honest 503/409 gates for lip-sync and motion transfer, brand-kit ad variations, cast-library cloning, scene splitting, queue-backed storyboard/voice and the admin film controls.
 

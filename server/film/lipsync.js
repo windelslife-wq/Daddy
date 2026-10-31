@@ -24,16 +24,16 @@ import {
 
 const FEATURE = 'lip_sync';
 
-export function lipSyncStatus() {
+export async function lipSyncStatus() {
   return {
-    ...providerStatus({
+    ...(await providerStatus({
       feature: FEATURE,
       envProvider: config.film.lipSyncProvider,
       models: {
         replicate: config.film.lipSyncReplicateModel,
         fal: config.film.lipSyncFalModel,
       },
-    }),
+    })),
     requirements: ['scene clip from the video provider', 'recorded voice take'],
   };
 }
@@ -48,7 +48,7 @@ export async function sceneLipSync(userId, filmId, sceneId, role = 'user') {
     hasVoice: Boolean(scene.voice_path && fsSync.existsSync(scene.voice_path)),
     provider: scene.lipsync_provider || null,
     syncedAt: scene.lipsync_at || null,
-    status: lipSyncStatus(),
+    status: await lipSyncStatus(),
   };
 }
 
@@ -62,9 +62,11 @@ export async function queueLipSync(userId, filmId, sceneId, role = 'user') {
   if (!scene.voice_path || !fsSync.existsSync(scene.voice_path)) {
     throw new AppError(409, 'voice_take_required', 'Record a voice take for this scene before syncing lips.');
   }
-  const status = lipSyncStatus();
+  const status = await lipSyncStatus();
   if (!status.configured) {
-    throw new AppError(503, 'lip_sync_unavailable', 'No lip-sync provider is configured. Set FILM_LIPSYNC_PROVIDER and REPLICATE_API_TOKEN or FAL_API_KEY. Nothing was changed.');
+    throw new AppError(503, 'lip_sync_unavailable', status.disabledByAdmin
+      ? 'The lip-sync provider is disabled by an administrator. Nothing was changed.'
+      : 'No lip-sync provider is configured. Set FILM_LIPSYNC_PROVIDER and REPLICATE_API_TOKEN or FAL_API_KEY. Nothing was changed.');
   }
   const jobId = await addJob('film_lipsync', { filmId, userId, sceneId, provider: status.provider }, { maxAttempts: 1 });
   await db('film_projects').where({ id: filmId }).update({ updated_at: now() });
@@ -84,7 +86,7 @@ export async function processLipSyncJob({ filmId, sceneId, provider }) {
   if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
   if (!scene.clip_path || !scene.voice_path) throw new AppError(409, 'lip_sync_inputs_missing', 'Clip or voice take disappeared before the job ran.');
   const selected = requestedProvider(provider) || provider;
-  const status = lipSyncStatus();
+  const status = await lipSyncStatus();
   if (!status.configured || !selected) {
     throw new AppError(503, 'lip_sync_unavailable', 'No lip-sync provider credential at run time. Nothing was changed.');
   }

@@ -7,8 +7,11 @@
  * are only written into the project when the director applies one.
  */
 import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import { db, now, newId, json, parseJson } from '../db.js';
+import { config } from '../config.js';
+import { generatePromptImage, imageProviderStatus } from '../media/images.js';
 import { AppError } from '../errors.js';
 import { ownedFilm, saveScreenplay } from './scenes.js';
 import { generateScreenplay } from './screenplay.js';
@@ -40,6 +43,7 @@ export function brandKitView(row) {
     audience: row.audience,
     colors: parseJson(row.colors, []),
     hasLogo: Boolean(row.logo_path && fs.existsSync(row.logo_path)),
+    hasProductShot: Boolean(row.product_image_path && fs.existsSync(row.product_image_path)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -75,6 +79,44 @@ export async function deleteBrandKit(userId, brandKitId) {
   await db('film_projects').where({ brand_kit_id: brandKitId }).update({ brand_kit_id: null, updated_at: now() });
   await db('brand_kits').where({ id: brandKitId }).delete();
   return { deleted: true };
+}
+
+/**
+ * Product photography: one square product shot per brand kit, generated with the
+ * configured image provider. With `IMAGE_PROVIDER=procedural` the result is real
+ * art but explicitly non-AI, which is reported back to the caller.
+ */
+export async function generateProductShot(userId, brandKitId) {
+  const kit = await db('brand_kits').where({ id: brandKitId, user_id: userId }).first();
+  if (!kit) throw new AppError(404, 'brand_kit_not_found', 'Brand kit not found.');
+  const status = imageProviderStatus();
+  if (!status.configured) {
+    throw new AppError(503, 'image_provider_unavailable', `IMAGE_PROVIDER=${status.provider} has no credentials, so no product shot was generated.`);
+  }
+  const prompt = [
+    `Professional advertising product photograph of ${kit.product || kit.name}.`,
+    kit.description ? `${kit.description}.` : '',
+    kit.tagline ? `Brand line: ${kit.tagline}.` : '',
+    kit.audience ? `For ${kit.audience}.` : '',
+    'Clean studio background, soft key light, high detail, commercial photography, no text, no watermark.',
+  ].filter(Boolean).join(' ');
+  const dir = path.join(config.storageDir, 'brand-kits');
+  const outputPath = path.join(dir, `${kit.id}-product.png`);
+  let image;
+  try {
+    image = await generatePromptImage({ prompt, aspectRatio: '1:1', style: 'realistic', seedKey: `brand:${kit.id}`, outputPath });
+  } catch (error) {
+    throw new AppError(502, 'image_generation_failed', `The image provider failed: ${error.message}`);
+  }
+  await db('brand_kits').where({ id: kit.id }).update({ product_image_path: outputPath, updated_at: now() });
+  return {
+    brandKit: brandKitView(await db('brand_kits').where({ id: kit.id }).first()),
+    provider: image.provider,
+    aiGenerated: Boolean(image.ai),
+    width: image.width,
+    height: image.height,
+    prompt,
+  };
 }
 
 /** Attach a brand kit so variant generation and prompts use it. */

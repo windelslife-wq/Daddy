@@ -10,6 +10,8 @@ import { AppError } from '../errors.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 import { listModels } from '../film/models.js';
 import { setProviderEnabled, disabledProviders } from '../film/providerGuard.js';
+import { config } from '../config.js';
+import { logger } from '../logger.js';
 import { asyncHandler as h } from '../errors.js';
 
 export function filmAdminRouter() {
@@ -22,7 +24,7 @@ export function filmAdminRouter() {
     const queueRows = await db('jobs')
       .select('type', 'status')
       .count('* as count')
-      .whereIn('type', ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion', 'film_dispatch_scenes'])
+      .whereIn('type', ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion', 'film_dispatch_scenes', 'film_production_run'])
       .groupBy('type', 'status');
     const queue = {};
     for (const row of queueRows) {
@@ -30,7 +32,7 @@ export function filmAdminRouter() {
       queue[row.type][row.status] = number(row.count);
     }
     const failed = await db('jobs')
-      .whereIn('type', ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion'])
+      .whereIn('type', ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion', 'film_production_run'])
       .where({ status: 'failed' })
       .orderBy('updated_at', 'desc')
       .limit(10)
@@ -60,7 +62,7 @@ export function filmAdminRouter() {
 
   router.post('/jobs/retry-failed', h(async (req, res) => {
     const type = req.body?.type ? String(req.body.type) : null;
-    const types = ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion'];
+    const types = ['film_generate_scene', 'film_assemble', 'film_storyboard_batch', 'film_voice_batch', 'film_lipsync', 'film_motion', 'film_production_run'];
     if (type && !types.includes(type)) throw new AppError(400, 'unknown_job_type', 'Unknown film job type.');
     const query = db('jobs').whereIn('type', type ? [type] : types).where({ status: 'failed' });
     const rows = await query.select('id');
@@ -71,6 +73,48 @@ export function filmAdminRouter() {
       });
     }
     res.json({ requeued: rows.length });
+  }));
+
+  /**
+   * Live provider reachability. Only providers with credentials are contacted;
+   * everything else reports `checked: false` with the reason. Results are
+   * recorded as observed, never assumed.
+   */
+  router.get('/health', h(async (req, res) => {
+    const models = listModels();
+    const roots = {
+      replicate: process.env.REPLICATE_API_ROOT || 'https://api.replicate.com',
+      fal: process.env.FAL_API_ROOT || 'https://fal.run',
+      veo: process.env.GOOGLE_VEO_API_ROOT || 'https://generativelanguage.googleapis.com',
+    };
+    const checks = {
+      replicate: { url: `${roots.replicate}/v1/account`, headers: { Authorization: `Bearer ${config.film.replicateToken}` } },
+      fal: { url: `${roots.fal}/`, headers: { Authorization: `Key ${config.film.falKey}` } },
+      veo: { url: `${roots.veo}/v1beta/models?key=${encodeURIComponent(config.film.veoKey || '')}`, headers: {} },
+    };
+    const results = await Promise.all(models.video.items.map(async (item) => {
+      const check = checks[item.id];
+      if (!item.configured || !check) {
+        return { id: item.id, checked: false, reachable: null, reason: item.configured ? 'No health endpoint for this provider.' : 'No credential configured.' };
+      }
+      const started = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        const response = await fetch(check.url, { headers: check.headers, signal: controller.signal });
+        return {
+          id: item.id, checked: true, reachable: response.status < 500,
+          status: response.status, latencyMs: Date.now() - started,
+        };
+      } catch (error) {
+        const reason = error.name === 'AbortError' ? 'Timed out after 4s.' : error.message;
+        logger.warn({ provider: item.id, reason }, 'Provider health check failed');
+        return { id: item.id, checked: true, reachable: false, status: null, latencyMs: Date.now() - started, reason };
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
+    res.json({ checkedAt: new Date().toISOString(), providers: results });
   }));
 
   router.get('/providers', h(async (req, res) => {

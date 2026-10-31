@@ -15,6 +15,7 @@ import { db, now, parseJson, number } from '../db.js';
 import { AppError } from '../errors.js';
 import { config } from '../config.js';
 import { ownedFilm } from './scenes.js';
+import { overlayAssetList } from './overlays.js';
 
 export const MAX_OVERLAY_TEXT = 120;
 const FONT_CANDIDATES = [
@@ -78,7 +79,7 @@ export function vfxFilter(presetId, width, height) {
   try { return preset.filter(width, height); } catch { return ''; }
 }
 
-export const OVERLAY_POSITIONS = ['bottom', 'top', 'center'];
+export const OVERLAY_POSITIONS = ['bottom', 'top', 'center', 'bottom_right', 'bottom_left', 'top_right', 'top_left'];
 
 export function drawTextEscape(value) {
   return String(value)
@@ -91,20 +92,27 @@ export function drawTextEscape(value) {
     .replace(/,/g, '\\,');
 }
 
-/** Validate and clamp an overlay payload. Returns null when clearing. */
+/**
+ * Validate and clamp an overlay payload (text, picture-in-picture image, or
+ * both). Returns null when there is nothing to draw.
+ */
 export function normaliseOverlay(input) {
   if (!input) return null;
   const text = String(input.text || '').trim().slice(0, MAX_OVERLAY_TEXT);
-  if (!text) return null;
+  const overlayId = input.overlayId ? String(input.overlayId).slice(0, 48) : null;
+  if (!text && !overlayId) return null;
   const start = Number(input.startSeconds);
   const end = Number(input.endSeconds);
   return {
-    text,
-    position: OVERLAY_POSITIONS.includes(input.position) ? input.position : 'bottom',
+    text: text || '',
+    overlayId,
+    position: OVERLAY_POSITIONS.includes(input.position) ? input.position : (overlayId ? 'bottom_right' : 'bottom'),
     startSeconds: Number.isFinite(start) ? Math.max(0, Math.min(600, start)) : 0,
     endSeconds: Number.isFinite(end) ? Math.max(0, Math.min(600, end)) : 0,
     opacity: Number.isFinite(Number(input.opacity)) ? Math.max(0.15, Math.min(1, Number(input.opacity))) : 0.9,
     size: Number.isFinite(Number(input.size)) ? Math.max(12, Math.min(96, Math.round(Number(input.size)))) : 28,
+    // Picture-in-picture width as a fraction of the frame.
+    scale: Number.isFinite(Number(input.scale)) ? Math.max(0.1, Math.min(0.6, Number(input.scale))) : 0.28,
   };
 }
 
@@ -136,7 +144,7 @@ export function editFilters({ scene, width, height, visible }) {
   if (track.speedFactor !== 1) filters.push(`setpts=PTS/${track.speedFactor}`);
   const look = vfxFilter(track.vfxPreset, width, height);
   if (look) filters.push(look);
-  if (track.overlay) {
+  if (track.overlay?.text) {
     const font = overlayFont();
     if (font) {
       const overlay = track.overlay;
@@ -158,6 +166,26 @@ export function editFilters({ scene, width, height, visible }) {
   return filters;
 }
 
+export function overlayImageFilter({ overlay, width, height, visible, imageIndex = 1 }) {
+  if (!overlay?.overlayId) return null;
+  const pipWidth = Math.max(2, Math.round((width * overlay.scale) / 2) * 2);
+  const margin = Math.round(width * 0.03);
+  const positions = {
+    bottom_right: `W-w-${margin}:H-h-${margin}`,
+    bottom_left: `${margin}:H-h-${margin}`,
+    top_right: `W-w-${margin}:${margin}`,
+    top_left: `${margin}:${margin}`,
+    center: '(W-w)/2:(H-h)/2',
+    bottom: `(W-w)/2:H-h-${margin}`,
+    top: `(W-w)/2:${margin}`,
+  };
+  const start = Math.max(0, Math.min(overlay.startSeconds, Math.max(0, visible - 0.2)));
+  const end = overlay.endSeconds > 0 ? Math.min(overlay.endSeconds, visible) : visible;
+  const enable = end > start ? `:enable=between(t\\,${start.toFixed(2)}\\,${end.toFixed(2)})` : '';
+  return `[${imageIndex}:v]scale=${pipWidth}:-2,format=rgba,colorchannelmixer=aa=${overlay.opacity.toFixed(2)}[pip]`
+    + `;[bg][pip]overlay=${positions[overlay.position] || positions.bottom_right}${enable}[vout]`;
+}
+
 export async function updateSceneTrack(userId, filmId, sceneId, payload = {}, role = 'user') {
   await ownedFilm(userId, filmId, role);
   const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
@@ -177,6 +205,12 @@ export async function updateSceneTrack(userId, filmId, sceneId, payload = {}, ro
   }
   if (payload.overlay !== undefined) {
     const overlay = normaliseOverlay(payload.overlay);
+    if (overlay?.overlayId) {
+      const assets = await overlayAssetList(filmId);
+      if (!assets.some((asset) => asset.id === overlay.overlayId)) {
+        throw new AppError(400, 'overlay_asset_unknown', 'Upload that overlay image to this project before using it.');
+      }
+    }
     patch.overlay_json = overlay ? JSON.stringify(overlay) : null;
   }
   await db('film_scenes').where({ id: sceneId }).update(patch);
@@ -192,6 +226,7 @@ export async function updateSceneTrack(userId, filmId, sceneId, payload = {}, ro
 
 export async function editingOverview(userId, filmId, role = 'user') {
   const film = await ownedFilm(userId, filmId, role);
+  const overlayAssets = await overlayAssetList(filmId);
   const scenes = await db('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc')
     .select('id', 'ordinal', 'heading', 'duration_seconds', 'clip_path', 'overlay_json', 'speed_factor', 'vfx_preset', 'trim_start', 'trim_end', 'transition', 'lipsync_provider');
   return {
@@ -199,6 +234,7 @@ export async function editingOverview(userId, filmId, role = 'user') {
     title: film.title,
     font: overlayFont(),
     vfxPresets: listVfxPresets(),
+    overlayAssets,
     scenes: scenes.map((scene) => ({
       id: scene.id,
       ordinal: number(scene.ordinal),
@@ -207,8 +243,8 @@ export async function editingOverview(userId, filmId, role = 'user') {
       hasClip: Boolean(scene.clip_path && fsSync.existsSync(scene.clip_path)),
       track: sceneTrack(scene),
     })),
-    tracks: ['video (provider clip)', 'overlay text (FFmpeg drawtext)', 'voice/SFX/music mix (assembly)', 'burned subtitles'],
-    notImplemented: ['image picture-in-picture', 'separate music stems beyond the score mix', 'frame-accurate keyframes'],
+    tracks: ['video (provider clip)', 'text overlay (FFmpeg drawtext)', 'picture-in-picture image overlay', 'voice/SFX/music mix (assembly)', 'burned subtitles'],
+    notImplemented: ['frame-accurate keyframe animation', 'per-word karaoke subtitles'],
     maxSceneSeconds: config.film.maxSceneSeconds,
   };
 }
