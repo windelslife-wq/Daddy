@@ -29,7 +29,10 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Set these in `.env`:
+Set these in `.env`. **Replace the development admin credentials in
+`.env.example`**: copying the example unchanged would otherwise use a publicly
+known password. Do not use the local preview's database or encryption key as a
+production secret. Keep `.env` out of backups intended for broad access.
 
 | Variable | Value |
 |---|---|
@@ -41,8 +44,11 @@ Set these in `.env`:
 | `NODE_ENV` | `production` |
 | `SECURE_COOKIES` | `true` |
 
-Compose sets `PUBLIC_BASE_URL=https://$DOMAIN`, `DATABASE_URL`, `TRUST_PROXY=true`
-and the worker flags for you. Keep `APP_ENCRYPTION_KEY` stable — rotating it
+Compose sets `APP_URL` and `PUBLIC_BASE_URL` to `https://$DOMAIN`, as well as
+`DATABASE_URL`, `TRUST_PROXY=true` and the worker flags. It also disables demo
+credential exposure. Use a URL-safe random PostgreSQL password (for example,
+hexadecimal characters) because it is embedded in a connection URL; URL-reserved
+characters must be percent-encoded there. Keep `APP_ENCRYPTION_KEY` stable — rotating it
 makes stored OAuth tokens unreadable (the setup wizard refuses to rotate
 silently).
 
@@ -87,7 +93,10 @@ docker compose logs -f app
 
 `app` waits for the Postgres healthcheck, creates/migrates every table on
 startup, serves the built frontend, and has a real `/api/meta/health`
-healthcheck. `worker` runs `server/worker-standalone.js` — a dedicated
+healthcheck. Workers wait for the app to become healthy before starting, avoiding
+a first-boot schema initialization race. The one-shot `db-bootstrap` service
+is in the `tools` profile and does not run during a normal `up`.
+`worker` runs `server/worker-standalone.js` — a dedicated
 worker-only process. Scaling it to 2+ is safe because `server/worker.js`
 claims jobs with a conditional `UPDATE … WHERE status = 'queued'`.
 

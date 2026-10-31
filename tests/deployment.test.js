@@ -81,6 +81,13 @@ test('docker-compose.yml is valid YAML and wires a real multi-worker stack', () 
   }
   assert.equal(String(doc.services.app.environment.WORKER_ENABLED).toLowerCase(), 'false');
   assert.equal(String(doc.services.worker.environment.WORKER_ENABLED).toLowerCase(), 'true');
+  assert.equal(doc.services.app.environment.APP_URL, doc.services.app.environment.PUBLIC_BASE_URL);
+  assert.equal(doc.services.app.environment.EXPOSE_DEMO_CREDENTIALS, 'false');
+  assert.match(doc.services.app.environment.ADMIN_PASSWORD, /ADMIN_PASSWORD:\?/);
+  assert.equal(doc.services.worker.depends_on.app.condition, 'service_healthy');
+  assert.equal(doc.services.worker.healthcheck.disable, true);
+  assert.deepEqual(doc.services['db-bootstrap'].profiles, ['tools']);
+  assert.equal(doc.services['db-bootstrap'].healthcheck.disable, true);
   assert.deepEqual(doc.services.worker.command, ['node', 'server/worker-standalone.js']);
   assert.deepEqual(doc.services['db-bootstrap'].command, ['node', 'scripts/db-bootstrap.mjs']);
   assert.ok(doc.services.caddy.ports.some((p) => String(p).startsWith('443:')));
