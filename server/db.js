@@ -54,6 +54,20 @@ export const tableDefinitions = {
     t.boolean('must_change_password').notNullable().defaultTo(false);
     t.index(['status']);
   },
+  // Developer API keys. Only a SHA-256 digest and a display prefix are stored,
+  // so a leaked database cannot be used to call the API.
+  api_keys: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('name', 120).notNullable();
+    t.string('prefix', 24).notNullable().unique();
+    t.string('key_hash', 64).notNullable();
+    t.text('scopes').notNullable().defaultTo('[]');
+    t.string('created_at', 40).notNullable();
+    t.string('last_used_at', 40);
+    t.string('revoked_at', 40);
+    t.integer('request_count').notNullable().defaultTo(0);
+  },
   sessions: (t) => {
     t.string('id', 48).primary();
     t.string('user_id', 48).notNullable().index();

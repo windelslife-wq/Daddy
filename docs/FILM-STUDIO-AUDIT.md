@@ -380,12 +380,47 @@ schedule control.
 
 ---
 
+## 6.12. Developer API (added after the film delivery pass)
+
+The platform had no way for an outside system to integrate: `/api` was session-bound
+and the only token endpoint was the internal sandbox publisher. That gap is now closed
+with a first-party, documented public API.
+
+- **`/api/v1`** — 14 endpoints: account/usage/credits (`/me`), projects (list, create,
+  get, create post), posts (list, get, approve, schedule), films (list, create, get,
+  queue generation) and channels (`/accounts`). All delegate to the same services the
+  app uses; nothing is reimplemented in a parallel stack.
+- **Authentication** — `fcl_live_…` bearer keys, created in *Workspace → Developer API*.
+  Only a SHA-256 digest and a display prefix are stored, lookup is constant-time, keys
+  carry `read` / `write` / `publish` scopes, revocation is immediate, and session
+  cookies are rejected by `/api/v1`.
+- **Isolation** — every query is filtered by the key owner; an administrator key sees
+  only its own resources.
+- **Rate limiting** — 120 requests/minute/key (`API_KEY_RATE_LIMIT_PER_MINUTE`) in
+  addition to the 600/minute application limit, advertised through the `RateLimit` header.
+- **Documentation that cannot drift** — `server/api/catalog.js` is the single source of
+  truth. The router mounts exactly the catalogued endpoints (a missing handler fails at
+  boot), `GET /api/developer/spec` feeds the public `/developers` reference page, and
+  `GET /api/developer/openapi.json` emits OpenAPI 3.1. `tests/api-v1.test.js` calls every
+  documented endpoint with a real key.
+- **UI** — public reference page `/developers` (quick start, auth, scopes, per-endpoint
+  parameters/curl/response, error table, limits, webhooks, copy buttons) and the
+  authenticated key manager `/app/developers` (create, reveal once, revoke, usage) in
+  the existing workspace navigation.
+- **Honest failure modes** — generation without a configured provider returns
+  `503 video_provider_unavailable` naming the missing setting; approving a post whose
+  video has not rendered returns `400` with an explanation. No endpoint fabricates a
+  clip or a publication.
+
+---
+
 ## 7. Test evidence
 
 ```
-npm test                 220 tests, 220 pass, 0 fail   (baseline was 174)
-npm run test:visual       13 checks, 13 pass (desktop + 390 px mobile)
-vite build               built successfully
+npm test                 227 tests, 227 pass, 0 fail   (220 before the developer API)
+npm run test:visual       14 checks, 14 pass (desktop + 390 px mobile)
+npm run test:e2e          15 checks, 15 pass
+vite build                built successfully
 ```
 
 New `tests/film-postproduction.test.js` (10 tests, real HTTP, real database,

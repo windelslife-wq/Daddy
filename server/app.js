@@ -23,6 +23,8 @@ import { adminRouter } from './routes/admin.js';
 import { filmAdminRouter } from './routes/film-admin.js';
 import { contactRouter } from './routes/contact.js';
 import { filmRouter } from './routes/films.js';
+import { developerRouter } from './routes/developer.js';
+import { apiV1Router } from './routes/api-v1.js';
 
 const distDir = path.join(config.root, 'dist');
 
@@ -105,6 +107,8 @@ export async function createApp() {
   // The film admin router is mounted first: its paths live under /api/admin/film
   // and must not be shadowed by the general admin gate.
   app.use('/api/admin/film', filmAdminRouter());
+  app.use('/api/developer', developerRouter());
+  app.use('/api/v1', apiV1Router());
   app.use('/api/admin', adminRouter());
   app.use('/api/contact', contactRouter());
   app.use('/api/films', filmRouter());

@@ -61,6 +61,12 @@ STRIPE_WEBHOOK_SECRET=...`}</code></pre></div></article>
           <FeatureCard icon="shield" title="Admin" description="Users, plans, settings, jobs, broadcasts, and integration readiness reporting." />
         </div>
       </Section>
+      <Section eyebrow="Build on it" title="A public REST API for your own tools" description="Session endpoints above power the app. Integrations outside the browser use the versioned developer API with scoped keys, signed webhooks and an OpenAPI 3.1 document.">
+        <div className="hero-actions">
+          <Link to="/developers" className="btn btn-primary">Read the API reference <Icon name="arrow-right" size={16} /></Link>
+          <a className="btn btn-secondary" href="/api/developer/openapi.json" download="film-club-lens-openapi.json">Download OpenAPI</a>
+        </div>
+      </Section>
       <CTASection title="Need help with a deployment decision?" description="Send us the context and we’ll point you to the relevant configuration or provider-console requirement." primary={{ to: '/contact', label: 'Contact the team' }} secondary={{ to: '/help', label: 'Visit help center' }} />
     </>
   );

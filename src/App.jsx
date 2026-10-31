@@ -15,6 +15,7 @@ import Pricing from './pages/public/Pricing.jsx';
 import About from './pages/public/About.jsx';
 import Contact from './pages/public/Contact.jsx';
 import { Docs, Integrations, Help, Status, Security, Changelog, Careers, Press } from './pages/public/Resources.jsx';
+import ApiDocs from './pages/public/ApiDocs.jsx';
 import Sitemap from './pages/public/Sitemap.jsx';
 import { Privacy, Terms, Cookies, AcceptableUse, Dpa } from './pages/public/Legal.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -29,6 +30,7 @@ import Automation from './pages/Automation.jsx';
 import Settings from './pages/Settings.jsx';
 import Billing from './pages/Billing.jsx';
 import Admin from './pages/Admin.jsx';
+import Developers from './pages/Developers.jsx';
 import FilmStudio from './pages/film/FilmStudio.jsx';
 import ProductionAgent from './pages/film/ProductionAgent.jsx';
 import CreativeCanvas from './pages/film/CreativeCanvas.jsx';
@@ -95,6 +97,7 @@ export default function App() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="automation" element={<Automation />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="developers" element={<Developers />} />
           <Route path="billing" element={<Billing />} />
           <Route path="admin" element={<Admin />} />
           <Route path="films" element={<FilmStudio view="hub" />} />
@@ -122,6 +125,7 @@ export default function App() {
           <Route path="/features" element={<Features />} />
           <Route path="/solutions" element={<Solutions />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/developers" element={<ApiDocs />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/help" element={<Help />} />

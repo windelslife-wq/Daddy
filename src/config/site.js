@@ -16,6 +16,7 @@ export const PUBLIC_PAGES = [
   { path: '/features', label: 'Features', title: 'Platform features', description: 'AI scripts, original visuals, narration, captions, rendering, publishing, and analytics.', group: 'product', icon: 'sparkles', eyebrow: 'Platform' },
   { path: '/solutions', label: 'Solutions', title: 'Solutions for creators and teams', description: 'Workflows for creators, agencies, educators, publishers, and businesses.', group: 'product', icon: 'layers', eyebrow: 'Who it is for' },
   { path: '/pricing', label: 'Pricing', title: 'Plans and pricing', description: 'Transparent usage-based plans with server-enforced limits.', group: 'product', icon: 'credit-card', eyebrow: 'Plans' },
+  { path: '/developers', label: 'Developers', title: 'Developer API', description: 'REST API reference, scoped API keys, signed webhooks and an OpenAPI 3.1 document for building on the platform.', group: 'product', icon: 'code', eyebrow: 'Developers' },
   { path: '/integrations', label: 'Integrations', title: 'Official publishing integrations', description: 'Connect Facebook, Instagram, YouTube, X, AI, media, and payment providers.', group: 'product', icon: 'plug', eyebrow: 'Connect' },
   { path: '/docs', label: 'Documentation', title: 'Documentation', description: 'Set up the platform, understand the workflow, and configure production services.', group: 'resources', icon: 'book', eyebrow: 'Get started' },
   { path: '/help', label: 'Help Center', title: 'Help Center', description: 'Answers about accounts, content generation, publishing, billing, and security.', group: 'resources', icon: 'help', eyebrow: 'Support' },
@@ -65,6 +66,7 @@ export const APP_PAGES = [
   { path: '/app/analytics', label: 'Analytics', icon: 'bar-chart' },
   { path: '/app/billing', label: 'Plans & Billing', icon: 'credit-card' },
   { path: '/app/settings', label: 'Settings', icon: 'settings' },
+  { path: '/app/developers', label: 'Developer API', icon: 'key' },
   { path: '/app/admin', label: 'Admin', icon: 'shield', admin: true },
 ];
 

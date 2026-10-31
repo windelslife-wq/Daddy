@@ -224,6 +224,26 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
+  await t.test('the developer API reference renders the live catalogue', async () => {
+    await page.goto(base + '/developers', { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+    await page.locator('details.api-endpoint').first().waitFor({ timeout: 15000 });
+    const endpointCount = await page.locator('details.api-endpoint').count();
+    assert.ok(endpointCount >= 14, `expected the live API catalogue, rendered ${endpointCount} endpoints`);
+    const methods = await page.locator('details.api-endpoint > summary .api-method').allTextContents();
+    assert.ok(methods.includes('POST') && methods.includes('GET'), 'documented methods are rendered');
+    await page.locator('details.api-endpoint').first().locator('summary').click();
+    assert.equal(await page.locator('details.api-endpoint').first().evaluate((el) => el.open), true, 'endpoint details expand');
+    assert.ok((await page.locator('.api-docs-main .code-shell').count()) >= 20, 'request and response samples render');
+    await screenshot('api-docs-desktop.png');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(base + '/developers', { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+    await assertNoHorizontalOverflow('mobile /developers');
+    await screenshot('api-docs-mobile.png', 390);
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
   await t.test('signup creates a real account and reaches the workspace', async () => {
     await page.goto(`${base}/signup`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: /Create your workspace/i }).waitFor();
@@ -469,7 +489,7 @@ test('professional global website, themes, authentication, workspace, and respon
 
   await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {
+    for (const route of ['/', '/login', '/signup', '/pricing', '/developers', '/app']) {
       await page.goto(base + route, { waitUntil: 'networkidle' });
       await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 8000 });
       await assertNoHorizontalOverflow(`mobile ${route}`);

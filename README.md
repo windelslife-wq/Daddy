@@ -130,6 +130,33 @@ absolute media URLs use the host the browser actually visits.
 
 ---
 
+## Developer API
+
+A versioned REST API (`/api/v1`) lets your own systems drive the platform. Keys are created
+in **Workspace → Developer API**, scoped (`read` / `write` / `publish`), and stored only as
+SHA-256 hashes; revocation is immediate.
+
+| Resource | Where |
+|---|---|
+| Interactive reference (public) | `/developers` — rendered from the live catalogue |
+| Machine-readable spec | `GET /api/developer/spec` |
+| OpenAPI 3.1 document | `GET /api/developer/openapi.json` |
+| Key management | `GET/POST /api/developer/keys`, `DELETE /api/developer/keys/:id` |
+| Reference documentation | [`docs/API.md`](docs/API.md) |
+
+```bash
+export FCL_API_KEY="fcl_live_…"
+curl "$PUBLIC_BASE_URL/api/v1/me" -H "Authorization: Bearer $FCL_API_KEY"
+```
+
+Fourteen endpoints cover account/usage, projects, posts and publishing, films and scene
+generation, and connected channels. `tests/api-v1.test.js` calls every documented endpoint
+with a real key, so the published documentation cannot drift from the router. Provider-gated
+work (AI video, live social publishing) still requires operator credentials and returns
+`503` with the missing setting instead of fabricating output.
+
+---
+
 ## Activating external integrations
 
 Every module is implemented and contract-tested offline. The remaining work is

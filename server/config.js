@@ -188,6 +188,11 @@ export const config = {
     grantByPlan: { free: 60, starter: 300, creator: 900, scale: 3000 },
   },
   apiRateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MINUTE', 600),
+  // Public developer API (/api/v1). Keys are created in the app, never in env.
+  api: {
+    keyRateLimitPerMinute: envInt('API_KEY_RATE_LIMIT_PER_MINUTE', 120),
+  },
+  version: env('APP_VERSION', '1.0.0'),
   security: {
     trustProxy: envBool('TRUST_PROXY', true),
     secureCookies: envBool('SECURE_COOKIES', isProduction && env('PUBLIC_BASE_URL').startsWith('https://')),
