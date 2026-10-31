@@ -20,9 +20,10 @@ const STEPS = [
   { id: 'setup', label: '1 · Setup' },
   { id: 'write', label: '2 · Screenplay' },
   { id: 'cast', label: '3 · Cast' },
-  { id: 'scenes', label: '4 · Scenes' },
-  { id: 'render', label: '5 · Assemble' },
-  { id: 'preview', label: '6 · Preview' },
+  { id: 'locations', label: '4 · Locations' },
+  { id: 'scenes', label: '5 · Direct & generate' },
+  { id: 'render', label: '6 · Assemble' },
+  { id: 'preview', label: '7 · Preview' },
 ];
 
 function StepNav({ filmId, active }) {
@@ -273,11 +274,17 @@ function CastStep({ film, reload }) {
 
 function SceneCard({ scene, film, index, total, reload, onMove, onDelete, perVideoSecond = 10 }) {
   const { showToast } = useToast();
+  const { data: config } = useFilmConfig();
+  const cine = config?.cinematography || {};
   const [draft, setDraft] = useState({
     heading: scene.heading, location: scene.location, description: scene.description,
     visual_prompt: scene.visualPrompt, camera_movement: scene.cameraMovement,
     duration_seconds: scene.durationSeconds, dialogue: scene.dialogue || [],
     cast: (scene.cast || []).join(', '), sfx: scene.sfx || [],
+    location_id: scene.locationId || '',
+    shot_size: scene.shotSize || '', camera_angle: scene.cameraAngle || '',
+    lens: scene.lens || '', lighting: scene.lighting || '',
+    color_grade: scene.colorGrade || '', composition: scene.composition || '',
   });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(null);
@@ -293,6 +300,9 @@ function SceneCard({ scene, film, index, total, reload, onMove, onDelete, perVid
       await patch(`/api/films/${film.id}/scenes/${scene.id}`, {
         heading: draft.heading, location: draft.location, description: draft.description,
         visual_prompt: draft.visual_prompt, camera_movement: draft.camera_movement,
+        location_id: draft.location_id || null,
+        shot_size: draft.shot_size, camera_angle: draft.camera_angle, lens: draft.lens,
+        lighting: draft.lighting, color_grade: draft.color_grade, composition: draft.composition,
         duration_seconds: Number(draft.duration_seconds),
         dialogue: draft.dialogue.filter((d) => d.character && d.line).map((d) => ({ character: d.character, line: d.line, emotion: d.emotion || '' })),
         cast: String(draft.cast || '').split(',').map((name) => name.trim()).filter(Boolean),
@@ -340,9 +350,59 @@ function SceneCard({ scene, film, index, total, reload, onMove, onDelete, perVid
         <div className="film-scene-fields">
           <Field label="Heading"><input className="input" value={draft.heading} onChange={(e) => setDraft({ ...draft, heading: e.target.value })} /></Field>
           <div className="film-form-grid">
-            <Field label="Location"><input className="input" value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} /></Field>
-            <Field label="Camera movement"><input className="input" value={draft.camera_movement} onChange={(e) => setDraft({ ...draft, camera_movement: e.target.value })} /></Field>
+            <Field label="Saved location" hint="Linking a location keeps production design identical across scenes and episodes.">
+              <select className="input" value={draft.location_id} onChange={(e) => setDraft({ ...draft, location_id: e.target.value })}>
+                <option value="">Free-text location</option>
+                {(film.locations || []).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Location note"><input className="input" value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Rooftop, Lagos at dusk" /></Field>
           </div>
+          <div className="film-form-grid">
+            <Field label="Shot size">
+              <select className="input" value={draft.shot_size} onChange={(e) => setDraft({ ...draft, shot_size: e.target.value })}>
+                <option value="">Not directed</option>
+                {(cine.shotSizes || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Camera angle">
+              <select className="input" value={draft.camera_angle} onChange={(e) => setDraft({ ...draft, camera_angle: e.target.value })}>
+                <option value="">Not directed</option>
+                {(cine.cameraAngles || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="film-form-grid">
+            <Field label="Lens">
+              <select className="input" value={draft.lens} onChange={(e) => setDraft({ ...draft, lens: e.target.value })}>
+                <option value="">Default</option>
+                {(cine.lenses || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Camera movement">
+              <select className="input" value={draft.camera_movement} onChange={(e) => setDraft({ ...draft, camera_movement: e.target.value })}>
+                <option value="">Cinematic (default)</option>
+                {(cine.cameraMovements || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="film-form-grid">
+            <Field label="Lighting">
+              <select className="input" value={draft.lighting} onChange={(e) => setDraft({ ...draft, lighting: e.target.value })}>
+                <option value="">Natural</option>
+                {(cine.lighting || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Colour grade">
+              <select className="input" value={draft.color_grade} onChange={(e) => setDraft({ ...draft, color_grade: e.target.value })}>
+                <option value="">Neutral</option>
+                {(cine.colorGrades || []).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <Field label="Composition note" hint="Framing instruction sent to the video model, e.g. subject left third, negative space right.">
+            <input className="input" value={draft.composition} onChange={(e) => setDraft({ ...draft, composition: e.target.value })} />
+          </Field>
           <Field label="Action / description"><textarea className="input" rows={2} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></Field>
           <Field label="AI visual prompt" hint="This exact prompt is sent to the AI video provider. Include cast appearance, lighting and lens."><textarea className="input" rows={3} value={draft.visual_prompt} onChange={(e) => setDraft({ ...draft, visual_prompt: e.target.value })} /></Field>
           <Field label="Cast in this scene" hint="Names are matched to the recurring cast so faces, wardrobe and voices stay consistent. Comma separated.">
@@ -562,6 +622,111 @@ function ScenesStep({ film, reload }) {
   );
 }
 
+function LocationsStep({ film, reload }) {
+  const { showToast } = useToast();
+  const [form, setForm] = useState({ name: '', description: '', timeOfDay: '', weather: '', palette: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const locations = film.locations || [];
+  const usage = useMemo(() => {
+    const counts = {};
+    for (const scene of film.scenes || []) if (scene.locationId) counts[scene.locationId] = (counts[scene.locationId] || 0) + 1;
+    return counts;
+  }, [film.scenes]);
+
+  async function add(event) {
+    event.preventDefault();
+    setSaving(true); setError(null);
+    try {
+      await post(`/api/films/${film.id}/locations`, form);
+      setForm({ name: '', description: '', timeOfDay: '', weather: '', palette: '' });
+      await reload({ silent: true });
+      showToast('Location saved to the production library.', 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setSaving(false); }
+  }
+  async function remove(location) {
+    try {
+      const res = await del(`/api/films/${film.id}/locations/${location.id}`);
+      await reload({ silent: true });
+      showToast(`Location removed${res.detachedScenes ? `; ${res.detachedScenes} scene(s) unlinked` : ''}.`, 'success');
+    } catch (err) { showToast(err.message, 'error'); }
+  }
+  return (
+    <div className="grid grid-studio">
+      <Card title="Production locations" subtitle={`${locations.length} saved · reused by every scene and episode`} icon={Clapperboard}>
+        <ErrorBanner error={error} />
+        {!locations.length
+          ? <EmptyState icon={Clapperboard} title="No locations yet" description="Save the sets you film in once — the description, palette and time of day are reused by every scene set there, so episodes match." />
+          : (
+            <div className="film-list">
+              {locations.map((location) => (
+                <div className="film-row" key={location.id}>
+                  <div className="film-row-main">
+                    <strong>{location.name}</strong>
+                    <small>{location.description || 'No description'} · {location.timeOfDay || 'any time'} · {usage[location.id] || 0} scene(s)</small>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => remove(location)} aria-label={`Delete ${location.name}`}><Trash2 size={13} /></Button>
+                </div>
+              ))}
+            </div>
+          )}
+        <form onSubmit={add} style={{ marginTop: 16, display: 'grid', gap: 10 }}>
+          <Field label="Location name"><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Amara's apartment" /></Field>
+          <Field label="Set description" hint="Architecture, furniture, props and atmosphere. Sent to the video model for every scene filmed here.">
+            <textarea className="input" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Small Lagos apartment, worn sofa, lace curtains, framed family photos" />
+          </Field>
+          <div className="film-form-grid">
+            <Field label="Time of day"><input className="input" value={form.timeOfDay} onChange={(e) => setForm({ ...form, timeOfDay: e.target.value })} placeholder="dusk" /></Field>
+            <Field label="Weather"><input className="input" value={form.weather} onChange={(e) => setForm({ ...form, weather: e.target.value })} placeholder="humid, light rain" /></Field>
+          </div>
+          <Field label="Palette"><input className="input" value={form.palette} onChange={(e) => setForm({ ...form, palette: e.target.value })} placeholder="warm amber and deep green" /></Field>
+          <Button type="submit" disabled={saving || !form.name.trim()}>{saving ? <Spinner size={14} /> : <><Plus size={14} /> Save location</>}</Button>
+        </form>
+      </Card>
+      <Card title="How continuity works" subtitle="Why saved locations matter" icon={Info}>
+        <div className="film-breakdown">
+          <div className="film-breakdown-row"><span>Locations saved</span><strong>{locations.length}</strong></div>
+          <div className="film-breakdown-row"><span>Scenes linked</span><strong>{(film.scenes || []).filter((scene) => scene.locationId).length} / {film.sceneCount}</strong></div>
+          <div className="film-breakdown-row"><span>Scenes using free text</span><strong>{(film.scenes || []).filter((scene) => !scene.locationId).length}</strong></div>
+        </div>
+        <p className="film-provider-note">A linked location replaces the scene's free-text setting in the provider prompt with the saved set description, time of day, weather and palette. That is what keeps Episode 2 in the same room as Episode 1 instead of a freshly imagined one.</p>
+        <Button size="sm" variant="secondary" className="btn-block" to={`/app/films/project/${film.id}?step=scenes`}><Scissors size={14} /> Direct scenes</Button>
+      </Card>
+    </div>
+  );
+}
+
+function QCPanel({ film }) {
+  const [expanded, setExpanded] = useState(false);
+  const qc = useLoad(() => get(`/api/films/${film.id}/qc`), [film.id, film.readyScenes, film.status], { initial: null });
+  if (!qc.data) return null;
+  const tone = qc.data.status === 'pass' ? 'good' : qc.data.status === 'fail' ? 'danger' : 'warning';
+  const shown = expanded ? qc.data.checks : qc.data.checks.slice(0, 4);
+  return (
+    <Card title="Quality control" subtitle={`Continuity & completeness · ${qc.data.score}% · ${qc.data.summary.failed} blocking, ${qc.data.summary.warnings} warning(s)`} icon={CheckCircle2}>
+      <div className={`film-chip ${tone}`} style={{ marginBottom: 10 }}>
+        {qc.data.status === 'pass' ? <CheckCircle2 size={13} /> : <Info size={13} />} {pretty(qc.data.status)}
+      </div>
+      <div className="film-breakdown">
+        {shown.map((item) => (
+          <div className="film-breakdown-row" key={item.id}>
+            <span title={item.detail}>
+              <span className={`film-chip ${item.status === 'pass' ? 'good' : item.status === 'fail' ? 'danger' : item.status === 'warn' ? 'warning' : ''}`} style={{ marginRight: 6 }}>{item.status}</span>
+              {item.label}
+            </span>
+            <strong style={{ maxWidth: '55%', textAlign: 'right', fontWeight: 500 }}>{item.detail}</strong>
+          </div>
+        ))}
+      </div>
+      {qc.data.checks.length > 4 && (
+        <Button size="sm" variant="ghost" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Show less' : `Show all ${qc.data.checks.length} checks`}</Button>
+      )}
+      <Button size="sm" variant="ghost" className="btn-block" style={{ marginTop: 8 }} onClick={() => qc.reload({ silent: true })}><RefreshCw size={13} /> Re-run QC</Button>
+    </Card>
+  );
+}
+
 function RenderStep({ film, reload }) {
   const { showToast } = useToast();
   const [pending, setPending] = useState(null);
@@ -638,6 +803,7 @@ function RenderStep({ film, reload }) {
         </div>
         <Button size="sm" variant="secondary" className="btn-block" style={{ marginTop: 12 }} to={`/app/films/project/${film.id}?step=setup`}>Manage audio & references</Button>
       </Card>
+      <QCPanel film={film} />
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Render this film?" description="FFmpeg assembly of your real AI clips. Nothing is re-generated." size="md"
         footer={<><Button variant="ghost" onClick={() => setConfirm(false)}>Cancel</Button><Button onClick={assemble} disabled={pending}>{pending ? <Spinner size={14} /> : 'Queue render'}</Button></>}>
         <div className="film-breakdown">
@@ -724,6 +890,7 @@ export default function FilmWorkspace() {
       {step === 'setup' && <SetupStep film={film} reload={reload} />}
       {step === 'write' && <WriteStep film={film} reload={reload} />}
       {step === 'cast' && <CastStep film={film} reload={reload} />}
+      {step === 'locations' && <LocationsStep film={film} reload={reload} />}
       {step === 'scenes' && <ScenesStep film={film} reload={reload} />}
       {step === 'render' && <RenderStep film={film} reload={reload} />}
       {step === 'preview' && <PreviewStep film={film} reload={reload} />}

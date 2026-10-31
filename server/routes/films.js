@@ -31,6 +31,12 @@ import {
   cancelFilmAssembly, addSfxAsset, deleteSfxAsset, sfxAssetList, validateSceneProvider,
 } from '../film/scenes.js';
 import { assemblyPreflight } from '../film/assembly.js';
+import { cinematographyCatalog } from '../film/cinematography.js';
+import {
+  locationSchema, patchLocationSchema,
+  listLocations, createLocation, updateLocation, deleteLocation,
+} from '../film/locations.js';
+import { filmQualityReport } from '../film/continuity.js';
 import {
   seriesSchema, episodeSchema, patchEpisodeSchema, EPISODE_STATUSES,
   createSeries, listSeries, seriesDetail, updateSeries, deleteSeries,
@@ -122,6 +128,7 @@ export function filmRouter() {
     res.json({
       types: FILM_TYPES, genres: FILM_GENRES, styles: FILM_STYLES,
       aspectRatios: FILM_ASPECTS, platforms: FILM_PLATFORMS,
+      cinematography: cinematographyCatalog(),
       languages: ['en', 'es', 'fr', 'de', 'pt', 'it', 'nl', 'pl', 'tr', 'zh', 'ha', 'yo', 'ig', 'sw', 'ar', 'hi'],
       voices: ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer', 'sage', 'eleven-default'],
       limits,
@@ -307,6 +314,36 @@ export function filmRouter() {
     const data = z.object({ screenplay: z.any() }).parse(req.body || {});
     normaliseEditedScreenplay(data.screenplay);
     res.json(await saveScreenplay(req.user.id, req.params.id, data.screenplay, req.user.role));
+  }));
+
+  // ---- Locations library ---------------------------------------------------
+  router.get('/:id/locations', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json({ locations: await listLocations(req.user.id, { filmId: film.id, seriesId: film.series_id || undefined }) });
+  }));
+
+  router.post('/:id/locations', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const data = locationSchema.parse({ ...(req.body || {}), filmId: film.id, seriesId: null });
+    res.status(201).json({ location: await createLocation(req.user.id, data, req.user.role) });
+  }));
+
+  router.patch('/:id/locations/:locationId', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const data = patchLocationSchema.parse(req.body || {});
+    // Scope is fixed by the project the request came through.
+    delete data.filmId; delete data.seriesId;
+    res.json({ location: await updateLocation(req.user.id, req.params.locationId, data, req.user.role) });
+  }));
+
+  router.delete('/:id/locations/:locationId', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json(await deleteLocation(req.user.id, req.params.locationId));
+  }));
+
+  // ---- Quality control / continuity ---------------------------------------
+  router.get('/:id/qc', h(async (req, res) => {
+    res.json(await filmQualityReport(req.user.id, req.params.id, req.user.role));
   }));
 
   // ---- Scenes --------------------------------------------------------------

@@ -282,6 +282,56 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.getByRole('menuitemradio', { name: /Midnight/i }).click();
   });
 
+  await t.test('film studio locations, shot direction and QC screens work end to end', async () => {
+    // Create a real project through the same API the UI uses, then drive the UI.
+    const project = await page.evaluate(async () => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          type: 'cinematic_scene', title: 'Visual director test', genre: 'family_drama',
+          style: 'cinematic', aspectRatio: '16:9', targetPlatform: 'youtube', targetDurationSeconds: 60,
+        }),
+      })).json();
+      await fetch(`/api/films/${created.film.id}/screenplay`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ idea: 'A city wakes up at dawn and a family makes a choice', allowTemplate: true }),
+      });
+      return created.film;
+    });
+    assert.ok(project?.id, 'project must be created through the API');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=locations`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Production locations/i }).waitFor({ timeout: 15000 });
+    await page.locator('input[placeholder="Amara\'s apartment"]').fill('Rooftop at dawn');
+    await page.locator('textarea[placeholder^="Small Lagos apartment"]').fill('Concrete rooftop, water tanks, skyline haze');
+    await page.getByRole('button', { name: /Save location/i }).click();
+    await page.getByText('Rooftop at dawn').first().waitFor({ timeout: 15000 });
+    await screenshot('film-locations-desktop.png');
+    await assertNoHorizontalOverflow('film locations');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=scenes`, { waitUntil: 'networkidle' });
+    await page.getByText(/Storyboard/i).first().waitFor({ timeout: 15000 });
+    await page.getByText('Shot size').first().waitFor();
+    await page.getByText('Camera angle').first().waitFor();
+    await page.getByText('Colour grade').first().waitFor();
+    assert.ok(await page.locator('.film-scene-card').count() > 0, 'scenes must render');
+    await screenshot('film-director-desktop.png');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=render`, { waitUntil: 'networkidle' });
+    await page.getByText(/Quality control/i).first().waitFor({ timeout: 15000 });
+    await page.getByText(/Every scene has a real generated clip/i).first().waitFor();
+    await screenshot('film-qc-desktop.png');
+
+    // The same three screens must fit a phone viewport without horizontal scrolling.
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const step of ['locations', 'scenes', 'render']) {
+      await page.goto(`${base}/app/films/project/${project.id}?step=${step}`, { waitUntil: 'networkidle' });
+      await page.locator('.film-steps').waitFor({ timeout: 15000 });
+      await assertNoHorizontalOverflow(`mobile film ${step}`);
+    }
+  });
+
   await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {

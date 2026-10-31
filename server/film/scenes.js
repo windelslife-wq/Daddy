@@ -35,6 +35,11 @@ import {
   requireVideoProvider, resolveVideoProvider, cancelVideoGeneration, providerStatus,
 } from './videoProviders.js';
 import { invalidateAssembly, assembleFilm, assemblyPreflight } from './assembly.js';
+import {
+  SHOT_SIZES, CAMERA_ANGLES, CAMERA_MOVEMENTS, LENSES, LIGHTING, COLOR_GRADES,
+  describeShot,
+} from './cinematography.js';
+import { listLocations } from './locations.js';
 
 const SCENE_STATUSES = ['draft', 'planned', 'queued', 'processing', 'ready', 'failed', 'cancelled'];
 const ACTIVE_SCENE_STATUSES = ['queued', 'processing'];
@@ -64,9 +69,11 @@ export const patchFilmSchema = createFilmSchema.partial().omit({ type: true, ser
   sceneProvider: z.string().max(60).optional().nullable(),
 });
 
+const emptyOr = (values) => z.enum(['', ...values]).optional();
 export const patchSceneSchema = z.object({
   heading: z.string().max(220).optional(),
   location: z.string().max(220).optional(),
+  location_id: z.string().max(48).optional().nullable(),
   time_of_day: z.string().max(60).optional(),
   description: z.string().max(2000).optional(),
   dialogue: z.array(z.object({ character: z.string().min(1).max(120), line: z.string().min(1).max(1000), emotion: z.string().max(80).optional() })).max(20).optional(),
@@ -74,6 +81,14 @@ export const patchSceneSchema = z.object({
   visual_prompt: z.string().max(2000).optional(),
   duration_seconds: z.number().int().min(config.film.minSceneSeconds).max(config.film.maxSceneSeconds).optional(),
   cast: z.array(z.string().min(1).max(120)).max(20).optional(),
+  // Cinematography: closed vocabularies, so an invalid control is rejected here
+  // instead of silently producing a prompt the provider ignores.
+  shot_size: emptyOr(SHOT_SIZES),
+  camera_angle: emptyOr(CAMERA_ANGLES),
+  lens: emptyOr(LENSES),
+  lighting: emptyOr(LIGHTING),
+  color_grade: emptyOr(COLOR_GRADES),
+  composition: z.string().max(400).optional(),
   sfx: z.array(z.object({
     assetId: z.string().min(1).max(60),
     atSeconds: z.number().min(0).max(120).optional().default(0),
@@ -141,6 +156,13 @@ export function sceneView(row) {
     description: row.description,
     dialogue: parseJson(row.dialogue, []),
     cameraMovement: row.camera_movement,
+    shotSize: row.shot_size || '',
+    cameraAngle: row.camera_angle || '',
+    lens: row.lens || '',
+    lighting: row.lighting || '',
+    colorGrade: row.color_grade || '',
+    composition: row.composition || '',
+    locationId: row.location_id || null,
     visualPrompt: row.visual_prompt,
     durationSeconds: number(row.duration_seconds),
     cast: parseJson(row.cast, []),
@@ -323,6 +345,10 @@ export async function saveScreenplay(userId, filmId, screenplay, role = 'user') 
         heading: scene.heading, location: scene.location, time_of_day: scene.time_of_day,
         description: scene.description, dialogue: json(scene.dialogue),
         camera_movement: scene.camera_movement, visual_prompt: scene.visual_prompt,
+        location_id: scene.location_id || null,
+        shot_size: scene.shot_size || '', camera_angle: scene.camera_angle || '',
+        lens: scene.lens || '', lighting: scene.lighting || '',
+        color_grade: scene.color_grade || '', composition: scene.composition || '',
         duration_seconds: scene.duration_seconds,
         cast: json(castFromScene(scene)),
         status: 'draft', stage: 'draft', progress: 0,
@@ -376,8 +402,23 @@ export async function updateScene(userId, filmId, sceneId, patch, role = 'user')
   if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
   const data = patchSceneSchema.parse(patch);
   const updates = { updated_at: now() };
-  for (const key of ['heading', 'location', 'time_of_day', 'description', 'camera_movement', 'visual_prompt', 'duration_seconds']) {
+  for (const key of [
+    'heading', 'location', 'time_of_day', 'description', 'camera_movement', 'visual_prompt',
+    'duration_seconds', 'shot_size', 'camera_angle', 'lens', 'lighting', 'color_grade', 'composition',
+  ]) {
     if (data[key] !== undefined) updates[key] = data[key];
+  }
+  if (data.location_id !== undefined) {
+    if (data.location_id) {
+      const location = await db('film_locations').where({ id: data.location_id, user_id: userId }).first();
+      if (!location) throw new AppError(400, 'location_unknown', 'Save this location to your library first, then link it to the scene.');
+      updates.location_id = location.id;
+      // Linking a location also names it on the slate unless the user typed a
+      // different on-screen location for this scene.
+      if (!data.location) updates.location = data.location || location.name;
+    } else {
+      updates.location_id = null;
+    }
   }
   if (data.dialogue) updates.dialogue = json(data.dialogue);
   if (data.cast) updates.cast = json(data.cast);
@@ -402,9 +443,13 @@ export async function updateScene(userId, filmId, sceneId, patch, role = 'user')
 
 function sceneViewToScreenplayScene(row) {
   return {
-    heading: row.heading, location: row.location, time_of_day: row.time_of_day,
+    heading: row.heading, location: row.location, location_id: row.location_id || null,
+    time_of_day: row.time_of_day,
     description: row.description, dialogue: parseJson(row.dialogue, []),
     camera_movement: row.camera_movement, visual_prompt: row.visual_prompt,
+    shot_size: row.shot_size || '', camera_angle: row.camera_angle || '',
+    lens: row.lens || '', lighting: row.lighting || '',
+    color_grade: row.color_grade || '', composition: row.composition || '',
     duration_seconds: number(row.duration_seconds),
     cast: parseJson(row.cast, []),
   };
@@ -422,6 +467,10 @@ export async function addScene(userId, filmId, payload = {}, role = 'user') {
     time_of_day: data.time_of_day || '', description: data.description || '',
     dialogue: json(data.dialogue || []), camera_movement: data.camera_movement || '',
     visual_prompt: data.visual_prompt || '', duration_seconds: data.duration_seconds || config.film.maxSceneSeconds,
+    location_id: data.location_id || null,
+    shot_size: data.shot_size || '', camera_angle: data.camera_angle || '',
+    lens: data.lens || '', lighting: data.lighting || '',
+    color_grade: data.color_grade || '', composition: data.composition || '',
     cast: json(castFromScene(data)), sfx: json([]),
     status: 'draft', stage: 'draft', progress: 0,
     created_at: now(), updated_at: now(),
@@ -587,7 +636,7 @@ function sceneCast(film, scene, characters) {
  * every scene so separate predictions stay visually consistent; image-to-video
  * models additionally receive the strongest available reference image.
  */
-export function scenePrompt(film, scene, characters = []) {
+export function scenePrompt(film, scene, characters = [], location = null) {
   const cast = sceneCast(film, scene, characters);
   const bible = parseJson(film.story_bible, {});
   const metadata = parseJson(film.metadata, {});
@@ -595,11 +644,19 @@ export function scenePrompt(film, scene, characters = []) {
   const castBlock = cast.length
     ? `CONSISTENT CAST — identical face, hair, age and wardrobe in this shot: ${cast.map((character) => `${character.name} (${character.appearance_prompt || character.description || character.role})`).join('; ')}.`
     : '';
+  // The saved location record wins over prose: it is the shared production
+  // design every scene in this set reuses.
+  const setting = location
+    ? `${location.name}${location.description ? ` — ${location.description}` : ''}`
+    : (scene.location || 'unspecified');
+  const weather = location?.weather ? `; weather: ${location.weather}` : '';
+  const shot = describeShot(scene);
   return [
     `${film.style} ${film.genre} film scene. ${scene.visual_prompt || scene.description || scene.heading}`,
-    `Setting: ${scene.location || 'unspecified'}; time of day: ${scene.time_of_day || 'unspecified'}.`,
+    `Setting: ${setting}; time of day: ${scene.time_of_day || location?.time_of_day || 'unspecified'}${weather}.`,
     castBlock,
-    `Camera: ${scene.camera_movement || 'cinematic'}.`,
+    shot ? `Cinematography: ${shot}.` : 'Cinematography: cinematic, natural.',
+    location?.palette ? `Production palette: ${location.palette}.` : '',
     dialogue ? `Dialogue context (do not render text): ${dialogue}.` : '',
     bible.world ? `World: ${bible.world}.` : '',
     bible.continuity_notes ? `Continuity: ${bible.continuity_notes}.` : '',
@@ -697,8 +754,11 @@ async function startSceneGeneration({ film, userId, scene, provider, alreadyClai
   let handle;
   try {
     const characters = await characterRowsFor(userId, film.id, film);
+    const location = scene.location_id
+      ? await db('film_locations').where({ id: scene.location_id, user_id: userId }).first()
+      : null;
     handle = await startVideoGeneration({
-      prompt: scenePrompt(film, scene, characters),
+      prompt: scenePrompt(film, scene, characters, location),
       referenceImagePath: referenceImageFor(film, scene, characters),
       seconds: number(scene.duration_seconds, config.film.maxSceneSeconds),
       aspectRatio: film.aspect_ratio,
@@ -1263,9 +1323,10 @@ export async function processFilmAssemblyJob(payload = {}) {
 // --- detail + publishing ---------------------------------------------------
 export async function filmDetail(userId, filmId, role = 'user') {
   const film = await ownedFilm(userId, filmId, role);
-  const [scenes, characters, summary, balance] = await Promise.all([
+  const [scenes, characters, locations, summary, balance] = await Promise.all([
     db('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc'),
     listCharacters(userId, { filmId, seriesId: film.series_id || undefined }),
+    listLocations(userId, { filmId, seriesId: film.series_id || undefined }),
     sceneSummary([filmId]),
     getBalance(userId),
   ]);
@@ -1279,6 +1340,7 @@ export async function filmDetail(userId, filmId, role = 'user') {
     ...filmView(film, summary.get(filmId)),
     scenes: scenes.map(sceneView),
     characters,
+    locations,
     estimate,
     balance,
     assemblyReady: preflight.ready,

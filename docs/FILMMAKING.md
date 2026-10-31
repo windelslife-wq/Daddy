@@ -43,6 +43,31 @@ Tables: `film_projects`, `film_scenes`, `film_characters`, `film_series`, `film_
 
 ---
 
+### Directing shots, locations and quality control
+
+Phase 1 of the Film Studio upgrade adds real directorial control instead of a
+single free-text camera field:
+
+- **Shot direction.** Each scene stores `shot_size`, `camera_angle`, `lens`,
+  `lighting`, `color_grade`, `composition` and `camera_movement` from closed
+  vocabularies (`server/film/cinematography.js`). They are validated by the API
+  and translated into a cinematography sentence inside the provider prompt, for
+  example `close-up, low angle looking up at the subject, 85mm lens, shallow
+  depth of field, dolly pushing in, rim lighting, teal and orange grade`.
+  The AI screenplay author and the offline template both fill these in.
+- **Locations library.** Saved locations carry the set description, time of day,
+  weather, palette and style. Linking `location_id` on a scene makes the prompt
+  use that shared production design instead of prose, so later episodes return
+  to the same room. Locations can be project-, series- or user-scoped.
+- **Quality control.** `GET /api/films/:id/qc` audits the cut from persisted
+  state: missing clips, failed generations, undirected scenes, cast members
+  without reference images, speaking names with no character profile, unlinked
+  locations, runtime drift, TTS availability and render status. Each check
+  returns `pass | warn | fail | skip` with evidence; nothing passes by default.
+
+The full audit and the remaining phases are documented in
+[docs/FILM-STUDIO-AUDIT.md](FILM-STUDIO-AUDIT.md).
+
 ## 2. Real AI video providers
 
 Configure one or more providers on the server. `FILM_VIDEO_PROVIDER` is the server default; a project may store its own provider choice (`scene_provider`), which the server validates against the configured list before any request. Keys never leave the server; no endpoint returns them, and no key is ever written to a provider handle or job payload.
@@ -200,7 +225,10 @@ All routes require an authenticated session and are mounted at `/api/films`.
 | GET/PATCH/DELETE | `/:id` | Full detail / edit / delete a project. |
 | POST/PUT | `/:id/screenplay` | Generate / save an edited screenplay (rebuilds scene rows). |
 | GET/POST | `/:id/scenes` | List / add a scene. |
-| PATCH/DELETE | `/:id/scenes/:sceneId` | Edit / delete a scene. |
+| PATCH/DELETE | `/:id/scenes/:sceneId` | Edit / delete a scene, including shot size, camera angle, lens, lighting, colour grade, composition and location link. |
+| GET/POST | `/:id/locations` | List / create reusable filming locations for this project. |
+| PATCH/DELETE | `/:id/locations/:locationId` | Edit / delete a location (deleting detaches its scenes). |
+| GET | `/:id/qc` | Continuity and completeness audit: clips, cast references, shot direction, locations, runtime, TTS readiness, render. |
 | POST | `/:id/scenes/reorder` | Reorder storyboard. |
 | POST | `/:id/scenes/generate-all` | Queue all draft/failed scenes (bounded by concurrency). |
 | POST | `/:id/generation/start` | Start/resume a production run (`sceneIds` optional). |

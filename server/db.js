@@ -403,6 +403,24 @@ export const tableDefinitions = {
     t.string('updated_at', 40).notNullable();
     t.index(['user_id', 'film_id']);
   },
+  film_locations: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('series_id', 48).index();
+    t.string('name', 160).notNullable();
+    t.text('description').notNullable().defaultTo('');
+    t.string('time_of_day', 60).notNullable().defaultTo('');
+    t.string('weather', 60).notNullable().defaultTo('');
+    t.string('palette', 120).notNullable().defaultTo('');
+    t.string('style', 60).notNullable().defaultTo('');
+    t.text('reference_image_path');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.index(['user_id', 'film_id']);
+    t.index(['user_id', 'series_id']);
+  },
   film_scenes: (t) => {
     t.string('id', 48).primary();
     t.string('film_id', 48).notNullable().index();
@@ -410,7 +428,15 @@ export const tableDefinitions = {
     t.string('slug', 120).notNullable().defaultTo('');
     t.string('heading', 220).notNullable().defaultTo('');
     t.string('location', 220).notNullable().defaultTo('');
+    t.string('location_id', 48).index();
     t.string('time_of_day', 60).notNullable().defaultTo('');
+    // Cinematography controls (validated vocabularies in film/cinematography.js).
+    t.string('shot_size', 60).notNullable().defaultTo('');
+    t.string('camera_angle', 60).notNullable().defaultTo('');
+    t.string('lens', 40).notNullable().defaultTo('');
+    t.string('lighting', 60).notNullable().defaultTo('');
+    t.string('color_grade', 60).notNullable().defaultTo('');
+    t.text('composition').notNullable().defaultTo('');
     t.text('description').notNullable().defaultTo('');
     t.text('dialogue').notNullable().defaultTo('[]');
     t.string('camera_movement', 120).notNullable().defaultTo('');
@@ -529,6 +555,13 @@ export async function initializeDatabase(database, options = {}) {
       sfx: (t) => t.text('sfx').notNullable().defaultTo('[]'),
       cancel_requested: (t) => t.integer('cancel_requested').notNullable().defaultTo(0),
       queued_at: (t) => t.string('queued_at', 40),
+      location_id: (t) => t.string('location_id', 48),
+      shot_size: (t) => t.string('shot_size', 60).notNullable().defaultTo(''),
+      camera_angle: (t) => t.string('camera_angle', 60).notNullable().defaultTo(''),
+      lens: (t) => t.string('lens', 40).notNullable().defaultTo(''),
+      lighting: (t) => t.string('lighting', 60).notNullable().defaultTo(''),
+      color_grade: (t) => t.string('color_grade', 60).notNullable().defaultTo(''),
+      composition: (t) => t.text('composition').notNullable().defaultTo(''),
     },
   };
   for (const [table, columns] of Object.entries(filmColumns)) {

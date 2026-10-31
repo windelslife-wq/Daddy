@@ -16,8 +16,14 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { callLLM, extractJson } from '../ai.js';
 import { AppError } from '../errors.js';
+import {
+  SHOT_SIZES, CAMERA_ANGLES, LENSES, LIGHTING, COLOR_GRADES,
+} from './cinematography.js';
 
-export const FILM_TYPES = ['short_drama', 'long_drama', 'movie', 'episode'];
+export const FILM_TYPES = [
+  'short_drama', 'long_drama', 'movie', 'episode',
+  'advertisement', 'music_video', 'cinematic_scene',
+];
 export const FILM_GENRES = [
   'romance', 'family_drama', 'comedy', 'horror', 'thriller', 'action',
   'african_stories', 'historical_drama', 'mystery', 'scifi', 'documentary', 'other',
@@ -39,6 +45,13 @@ const sceneSchema = z.object({
   dialogue: z.array(dialogueSchema).max(20).optional().default([]),
   camera_movement: z.string().max(120).optional().default(''),
   visual_prompt: z.string().max(2000).optional().default(''),
+  shot_size: z.enum(SHOT_SIZES).optional().default(''),
+  camera_angle: z.enum(CAMERA_ANGLES).optional().default(''),
+  lens: z.enum(LENSES).optional().default(''),
+  lighting: z.enum(LIGHTING).optional().default(''),
+  color_grade: z.enum(COLOR_GRADES).optional().default(''),
+  composition: z.string().max(400).optional().default(''),
+  location_id: z.string().max(48).optional().nullable(),
   duration_seconds: z.number().int().min(1).max(60).optional(),
 });
 const screenplaySchema = z.object({
@@ -186,6 +199,7 @@ function systemPrompt() {
     'Return ONLY valid JSON matching the requested schema — no markdown fences, no commentary.',
     'Every scene must be filmable as a short AI video clip (typically 4-10 seconds). Write concrete visual prompts:',
     'subject, wardrobe, setting, lighting, lens, camera movement, mood. Keep character appearance descriptions IDENTICAL across all scenes so cast members stay consistent.',
+    'Also direct each scene like a cinematographer: choose shot_size, camera_angle, lens, lighting, color_grade and a one-line composition note from the allowed vocabularies.',
     'Dialogue must be short enough to speak within the scene duration. Include African and global settings respectfully and specifically when the genre asks for it.',
   ].join(' ');
 }
@@ -223,7 +237,8 @@ function buildPrompt(options, sceneCount, context = {}) {
     parts.push(`SCENES ALREADY WRITTEN (continue directly from the last one, keep locations/wardrobe identical): ${JSON.stringify(previousScenes.slice(-8).map((sc) => ({ heading: sc.heading, location: sc.location, description: sc.description, last_line: sc.dialogue?.slice(-1)?.[0]?.line || '' }))).slice(0, 2500)}`);
   }
   if (attempt > 1) parts.push(`A previous attempt returned fewer scenes than requested. Return exactly ${sceneCount} scene objects this time.`);
-  parts.push(`Return JSON: { title, logline, story_bible: {premise, world, themes[], continuity_notes}, characters: [{name, role, description, appearance_prompt, voice_preset}], scenes: [{heading, location, time_of_day, description, dialogue:[{character, line, emotion}], camera_movement, visual_prompt, duration_seconds}] }`);
+  parts.push(`Allowed shot_size: ${SHOT_SIZES.join(', ')}. Allowed camera_angle: ${CAMERA_ANGLES.join(', ')}. Allowed lens: ${LENSES.join(', ')}. Allowed lighting: ${LIGHTING.join(', ')}. Allowed color_grade: ${COLOR_GRADES.join(', ')}.`);
+  parts.push(`Return JSON: { title, logline, story_bible: {premise, world, themes[], continuity_notes}, characters: [{name, role, description, appearance_prompt, voice_preset}], scenes: [{heading, location, time_of_day, description, dialogue:[{character, line, emotion}], shot_size, camera_angle, lens, lighting, camera_movement, color_grade, composition, visual_prompt, duration_seconds}] }`);
   return parts.join('\n\n');
 }
 
@@ -237,6 +252,16 @@ function templateScreenplay(options, sceneCount) {
   ];
   const beats = ['setup', 'inciting incident', 'confrontation', 'reversal', 'climax', 'resolution'];
   const camera = ['slow push in', 'handheld follow', 'wide establishing', 'over-the-shoulder', 'low-angle dolly', 'gentle pull back'];
+  // Give the offline draft real directorial choices too, so the storyboard is
+  // immediately renderable instead of every scene defaulting to "cinematic".
+  const directions = [
+    { shot_size: 'wide', camera_angle: 'high_angle', lens: '24mm', lighting: 'golden_hour', color_grade: 'warm' },
+    { shot_size: 'medium', camera_angle: 'eye_level', lens: '50mm', lighting: 'natural', color_grade: 'neutral' },
+    { shot_size: 'medium_close', camera_angle: 'low_angle', lens: '85mm', lighting: 'low_key', color_grade: 'teal_orange' },
+    { shot_size: 'over_the_shoulder', camera_angle: 'eye_level', lens: '50mm', lighting: 'practical', color_grade: 'cool' },
+    { shot_size: 'close_up', camera_angle: 'low_angle', lens: '85mm', lighting: 'rim_light', color_grade: 'high_contrast' },
+    { shot_size: 'extreme_wide', camera_angle: 'overhead', lens: '18mm', lighting: 'blue_hour', color_grade: 'desaturated' },
+  ];
   const locations = [
     { location: 'A quiet city street at dusk', time_of_day: 'dusk' },
     { location: 'A small apartment living room', time_of_day: 'night' },
@@ -259,6 +284,7 @@ function templateScreenplay(options, sceneCount) {
         { character: b.name, line: 'Then tell me what you want to do about it.', emotion: 'steady' },
       ],
       camera_movement: camera[i % camera.length],
+      ...directions[i % directions.length],
       visual_prompt: `${style} ${genre} drama film still. ${a.name}: ${a.appearance_prompt}. ${b.name}: ${b.appearance_prompt}. ${beat.replace(/_/g, ' ')}, cinematic lighting, ${camera[i % camera.length]}, shallow depth of field, no text, no watermark.`,
       duration_seconds: Math.max(4, config.film.maxSceneSeconds),
     };
