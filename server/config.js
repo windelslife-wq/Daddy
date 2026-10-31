@@ -145,6 +145,14 @@ export const config = {
     falModel: env('FILM_FAL_VIDEO_MODEL', 'fal-ai/kling-video/v2.1/master/image-to-video'),
     veoKey: env('GOOGLE_VEO_API_KEY') || env('GEMINI_API_KEY'),
     veoModel: env('FILM_VEO_MODEL', 'veo-3.0-generate-001'),
+    // Provider-gated post-production. Same credentials as the video providers;
+    // the model ids are deliberately NOT defaulted so we never invent one.
+    lipSyncProvider: env('FILM_LIPSYNC_PROVIDER', 'auto').toLowerCase(),
+    lipSyncReplicateModel: env('FILM_LIPSYNC_REPLICATE_MODEL') || null,
+    lipSyncFalModel: env('FILM_FAL_LIPSYNC_MODEL') || null,
+    motionProvider: env('FILM_MOTION_PROVIDER', 'auto').toLowerCase(),
+    motionReplicateModel: env('FILM_MOTION_REPLICATE_MODEL') || null,
+    motionFalModel: env('FILM_FAL_MOTION_MODEL') || null,
     // One clip = one provider prediction. Both the clip length ceiling and the
     // number of clips per film are configurable so long-form production can be
     // scaled without touching code.

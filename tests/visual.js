@@ -408,6 +408,13 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.locator('.film-timeline-controls select').first().selectOption('fade_black');
     await page.getByRole('button', { name: /^Apply$/ }).first().click();
     await page.getByText(/applied to the next render/i).first().waitFor({ timeout: 15000 });
+
+    // Multi-track: expand the track editor, choose a look and apply it.
+    await page.locator('.film-track-editor > summary').first().click();
+    await page.locator('.film-track-editor select').first().selectOption('vignette');
+    await page.locator('.film-track-editor input[type="number"]').first().fill('0.5');
+    await page.locator('.film-track-editor').first().getByRole('button', { name: /Apply track/i }).click();
+    await page.getByText(/speed, look and overlay saved/i).first().waitFor({ timeout: 15000 });
     await screenshot('film-timeline-desktop.png');
 
     // 4. Creative canvas — a real flow executes through the UI.
@@ -445,8 +452,15 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.getByText(/meSpeak \(local\)/i).first().waitFor();
     await screenshot('film-models-desktop.png');
 
+    // 8. Ad Studio — brand kit form and campaign picker are real controls.
+    await page.goto(`${base}/app/films/ads`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Ad & Marketing Studio/i }).waitFor({ timeout: 15000 });
+    await page.getByText(/New brand kit/i).first().waitFor();
+    await page.getByRole('button', { name: /Save brand kit/i }).waitFor();
+    await screenshot('film-ads-desktop.png');
+
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const route of [`/app/films/project/${project.id}?step=storyboard`, `/app/films/project/${project.id}?step=voice`, `/app/films/project/${project.id}?step=timeline`, '/app/films/models']) {
+    for (const route of [`/app/films/project/${project.id}?step=storyboard`, `/app/films/project/${project.id}?step=voice`, `/app/films/project/${project.id}?step=timeline`, '/app/films/models', '/app/films/ads']) {
       await page.goto(base + route, { waitUntil: 'networkidle' });
       await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
       await assertNoHorizontalOverflow(`mobile ${route}`);

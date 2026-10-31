@@ -35,6 +35,8 @@ import {
   requireVideoProvider, resolveVideoProvider, cancelVideoGeneration, providerStatus,
 } from './videoProviders.js';
 import { invalidateAssembly, assembleFilm, assemblyPreflight } from './assembly.js';
+import { propClause, scenePropsForPrompt } from './propPrompt.js';
+import { resolveEnabledVideoProvider } from './providerGuard.js';
 import {
   SHOT_SIZES, CAMERA_ANGLES, CAMERA_MOVEMENTS, LENSES, LIGHTING, COLOR_GRADES,
   describeShot,
@@ -186,6 +188,11 @@ export function sceneView(row) {
     transition: row.transition || 'cut',
     trimStart: Number(row.trim_start) || 0,
     trimEnd: Number(row.trim_end) || 0,
+    speedFactor: Number(row.speed_factor) || 1,
+    vfxPreset: row.vfx_preset || 'none',
+    overlay: parseJson(row.overlay_json, null),
+    lipSyncProvider: row.lipsync_provider || null,
+    lipSyncAt: row.lipsync_at || null,
     provider: row.provider || null,
     providerJobId: row.provider_job_id || null,
     creditsCost: number(row.credits_cost),
@@ -204,7 +211,12 @@ export function characterView(row) {
     name: row.name, role: row.role, description: row.description,
     appearancePrompt: row.appearance_prompt, voicePreset: row.voice_preset,
     voiceProvider: row.voice_provider || null,
-    hasReferenceImage: Boolean(row.reference_image_path),
+    wardrobe: row.wardrobe || '',
+    expressions: parseJson(row.expressions, []),
+    relationships: parseJson(row.relationships, []),
+    ageRange: row.age_range || '',
+    isLibrary: number(row.is_library) === 1,
+    hasReferenceImage: Boolean(row.reference_image_path && fs.existsSync(row.reference_image_path)),
     createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -493,6 +505,66 @@ export async function addScene(userId, filmId, payload = {}, role = 'user') {
   return sceneView(await db('film_scenes').where({ id }).first());
 }
 
+/**
+ * Split a scene in two at a point inside its duration.
+ *
+ * Both halves keep the same clip and direction; the first keeps the head of the
+ * clip, the second starts later (trim_start) and gets the remaining time. This is
+ * the editing operation behind cutting on action, and it is reversible by
+ * deleting either half.
+ */
+export async function splitScene(userId, filmId, sceneId, atSeconds, role = 'user') {
+  await ownedFilm(userId, filmId, role);
+  const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
+  if (!scene) throw new AppError(404, 'scene_not_found', 'Scene not found.');
+  const duration = number(scene.duration_seconds);
+  const split = Number(atSeconds);
+  const min = config.film.minSceneSeconds;
+  if (!Number.isFinite(split) || split < min || duration - split < min) {
+    throw new AppError(400, 'invalid_split', `Split point must leave at least ${min}s on each side of a ${duration}s scene.`);
+  }
+  const ordinal = number(scene.ordinal);
+  const timestamp = now();
+  const secondSeconds = duration - split;
+  // Make room for the new ordinal without violating the (film_id, ordinal)
+  // unique constraint: shifting in one UPDATE would collide mid-statement.
+  const later = await db('film_scenes').where({ film_id: filmId }).where('ordinal', '>', ordinal)
+    .orderBy('ordinal', 'desc').select('id', 'ordinal');
+  for (const row of later) {
+    await db('film_scenes').where({ id: row.id }).update({ ordinal: number(row.ordinal) + 1 });
+  }
+  const newIdValue = newId('scn_');
+  await db('film_scenes').insert({
+    ...scene,
+    id: newIdValue,
+    ordinal: ordinal + 1,
+    duration_seconds: secondSeconds,
+    trim_start: number(scene.trim_start) + split,
+    trim_end: number(scene.trim_end),
+    dialogue: json([]),
+    voice_path: null, voice_provider: null, voice_duration: 0, voice_at: null,
+    status: scene.clip_path ? 'ready' : scene.status,
+    stage: scene.clip_path ? 'ready' : scene.stage,
+    progress: scene.clip_path ? 100 : 0,
+    created_at: timestamp,
+    updated_at: timestamp,
+  });
+  await db('film_scenes').where({ id: sceneId }).update({
+    duration_seconds: split,
+    trim_end: number(scene.trim_end) + secondSeconds,
+    updated_at: timestamp,
+  });
+  // Trigger rows carry an ordinal; the new half must not fire old SFX cues.
+  await db('film_scenes').where({ id: newIdValue }).update({ sfx: json([]) });
+  await invalidateAssembly(filmId);
+  const scenes = await db('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc');
+  return {
+    first: sceneView(scenes.find((row) => row.id === sceneId)),
+    second: sceneView(scenes.find((row) => row.id === newIdValue)),
+    scenes: scenes.length,
+  };
+}
+
 export async function deleteScene(userId, filmId, sceneId, role = 'user') {
   await ownedFilm(userId, filmId, role);
   const scene = await db('film_scenes').where({ id: sceneId, film_id: filmId }).first();
@@ -596,6 +668,18 @@ export const characterSchema = z.object({
   appearancePrompt: z.string().max(1500).optional().default(''),
   voicePreset: z.string().max(60).optional().default('nova'),
   voiceProvider: z.string().max(60).optional().nullable(),
+  // Character depth: wardrobe, named expressions, relationships and reuse.
+  wardrobe: z.string().max(600).optional().default(''),
+  expressions: z.array(z.object({
+    name: z.string().min(1).max(60),
+    description: z.string().max(300).optional().default(''),
+  })).max(12).optional().default([]),
+  relationships: z.array(z.object({
+    with: z.string().min(1).max(120),
+    kind: z.string().max(60).optional().default(''),
+  })).max(12).optional().default([]),
+  ageRange: z.string().max(40).optional().default(''),
+  isLibrary: z.boolean().optional().default(false),
   filmId: z.string().max(48).optional().nullable(),
   seriesId: z.string().max(48).optional().nullable(),
 });
@@ -610,7 +694,11 @@ export async function upsertCharacter(userId, payload) {
     await db('film_characters').where({ id: existing.id }).update({
       name: data.name, role: data.role, description: data.description,
       appearance_prompt: data.appearancePrompt, voice_preset: data.voicePreset,
-      voice_provider: data.voiceProvider, updated_at: now(),
+      voice_provider: data.voiceProvider,
+      wardrobe: data.wardrobe || '', expressions: json(data.expressions || []),
+      relationships: json(data.relationships || []), age_range: data.ageRange || '',
+      is_library: data.isLibrary ? 1 : 0,
+      updated_at: now(),
     });
     return characterView(await db('film_characters').where({ id: existing.id }).first());
   }
@@ -620,9 +708,40 @@ export async function upsertCharacter(userId, payload) {
     name: data.name, role: data.role, description: data.description,
     appearance_prompt: data.appearancePrompt, voice_preset: data.voicePreset,
     voice_provider: data.voiceProvider || null, metadata: json({}),
+    wardrobe: data.wardrobe || '', expressions: json(data.expressions || []),
+    relationships: json(data.relationships || []), age_range: data.ageRange || '',
+    is_library: data.isLibrary ? 1 : 0,
     created_at: now(), updated_at: now(),
   });
   return characterView(await db('film_characters').where({ id }).first());
+}
+
+/** Copy a character (or a library entry) into another project. */
+export async function cloneCharacter(userId, characterId, filmId, role = 'user') {
+  const source = await db('film_characters').where({ id: characterId, user_id: userId }).first();
+  if (!source) throw new AppError(404, 'character_not_found', 'Character not found.');
+  if (filmId) await ownedFilm(userId, filmId, role);
+  const clash = await db('film_characters').where({ user_id: userId, film_id: filmId || null })
+    .whereRaw('LOWER(name) = ?', [String(source.name).toLowerCase()]).first();
+  if (clash) throw new AppError(409, 'character_exists', `${source.name} is already cast in this project.`);
+  const id = newId('chr_');
+  await db('film_characters').insert({
+    id, user_id: userId, film_id: filmId || null, series_id: null,
+    name: source.name, role: source.role, description: source.description,
+    appearance_prompt: source.appearance_prompt,
+    voice_preset: source.voice_preset, voice_provider: source.voice_provider,
+    wardrobe: source.wardrobe, expressions: source.expressions,
+    relationships: source.relationships, age_range: source.age_range,
+    is_library: 0, metadata: json({ clonedFrom: source.id }),
+    created_at: now(), updated_at: now(),
+  });
+  return characterView(await db('film_characters').where({ id }).first());
+}
+
+/** User-level cast library: characters marked reusable across projects. */
+export async function castLibrary(userId) {
+  const rows = await db('film_characters').where({ user_id: userId, is_library: 1 }).orderBy('name', 'asc');
+  return rows.map(characterView);
 }
 
 export async function deleteCharacter(userId, characterId) {
@@ -650,13 +769,13 @@ function sceneCast(film, scene, characters) {
  * every scene so separate predictions stay visually consistent; image-to-video
  * models additionally receive the strongest available reference image.
  */
-export function scenePrompt(film, scene, characters = [], location = null) {
+export function scenePrompt(film, scene, characters = [], location = null, props = []) {
   const cast = sceneCast(film, scene, characters);
   const bible = parseJson(film.story_bible, {});
   const metadata = parseJson(film.metadata, {});
   const dialogue = parseJson(scene.dialogue, []).map((line) => `${line.character}: ${line.line}`).join(' | ');
   const castBlock = cast.length
-    ? `CONSISTENT CAST — identical face, hair, age and wardrobe in this shot: ${cast.map((character) => `${character.name} (${character.appearance_prompt || character.description || character.role})`).join('; ')}.`
+    ? `CONSISTENT CAST — identical face, hair, age and wardrobe in this shot: ${cast.map((character) => `${character.name} (${character.appearance_prompt || character.description || character.role}${character.wardrobe ? `; wardrobe: ${character.wardrobe}` : ''}${character.age_range ? `; age: ${character.age_range}` : ''})`).join('; ')}.`
     : '';
   // The saved location record wins over prose: it is the shared production
   // design every scene in this set reuses.
@@ -671,10 +790,14 @@ export function scenePrompt(film, scene, characters = [], location = null) {
     castBlock,
     shot ? `Cinematography: ${shot}.` : 'Cinematography: cinematic, natural.',
     location?.palette ? `Production palette: ${location.palette}.` : '',
+    propClause(props),
     dialogue ? `Dialogue context (do not render text): ${dialogue}.` : '',
     bible.world ? `World: ${bible.world}.` : '',
     bible.continuity_notes ? `Continuity: ${bible.continuity_notes}.` : '',
     metadata.continuity ? `Production continuity: ${metadata.continuity}.` : '',
+    metadata.brand
+      ? `Brand campaign: ${metadata.brand.name}${metadata.brand.product ? ` — ${metadata.brand.product}` : ''}${metadata.brand.tagline ? `, tagline "${metadata.brand.tagline}"` : ''}${metadata.brand.colors?.length ? `, brand colours ${metadata.brand.colors.join('/')}` : ''}.`
+      : '',
     `Aspect ratio ${film.aspect_ratio}, ${film.language} language production, ${film.style} visual style, no on-screen text, no subtitles, no watermark, no logos, high production value.`,
   ].filter(Boolean).join(' ').slice(0, 4000);
 }
@@ -724,7 +847,7 @@ export async function requestSceneGeneration(userId, filmId, sceneId, role = 'us
   if (ACTIVE_SCENE_STATUSES.includes(scene.status)) {
     throw new AppError(409, 'scene_busy', 'This scene is already generating. Wait for it to finish or cancel it.');
   }
-  const provider = resolveVideoProvider(filmSceneProvider(film));
+  const provider = await resolveEnabledVideoProvider(filmSceneProvider(film));
   if (film.run_state !== 'running') {
     await db('film_projects').where({ id: filmId }).update({ run_state: 'running', run_started_at: film.run_started_at || now(), error: null, updated_at: now() });
   }
@@ -772,7 +895,7 @@ async function startSceneGeneration({ film, userId, scene, provider, alreadyClai
       ? await db('film_locations').where({ id: scene.location_id, user_id: userId }).first()
       : null;
     handle = await startVideoGeneration({
-      prompt: scenePrompt(film, scene, characters, location),
+      prompt: scenePrompt(film, scene, characters, location, await scenePropsForPrompt(film.id, scene.id)),
       referenceImagePath: referenceImageFor(film, scene, characters),
       seconds: number(scene.duration_seconds, config.film.maxSceneSeconds),
       aspectRatio: film.aspect_ratio,
@@ -823,7 +946,7 @@ export async function dispatchPlannedScenes(filmId, { keepAlive = false } = {}) 
     });
     if (!claimed) continue;
     try {
-      const provider = resolveVideoProvider(filmSceneProvider(fresh));
+      const provider = await resolveEnabledVideoProvider(filmSceneProvider(fresh));
       await startSceneGeneration({ film: fresh, userId: fresh.user_id, scene: { ...scene, status: 'processing' }, provider, alreadyClaimed: true });
       started += 1;
     } catch (error) {
@@ -846,7 +969,7 @@ export async function queueFilmScenes(userId, filmId, { sceneIds = null, role = 
   const film = await ownedFilm(userId, filmId, role);
   const scenes = await db('film_scenes').where({ film_id: filmId }).orderBy('ordinal', 'asc');
   if (!scenes.length) throw new AppError(409, 'no_scenes', 'Write a screenplay first — there are no scenes to generate.');
-  const provider = resolveVideoProvider(filmSceneProvider(film));
+  const provider = await resolveEnabledVideoProvider(filmSceneProvider(film));
   const target = sceneIds && sceneIds.length
     ? scenes.filter((scene) => sceneIds.includes(scene.id))
     : scenes.filter((scene) => PENDING_SCENE_STATUSES.includes(scene.status) && scene.status !== 'planned');
@@ -1353,6 +1476,23 @@ export async function filmDetail(userId, filmId, role = 'user') {
   return {
     ...filmView(film, summary.get(filmId)),
     scenes: scenes.map(sceneView),
+    sceneProps: await (async () => {
+      const links = await db('film_scene_props').where({ film_id: filmId });
+      const props = links.length ? await db('film_props').whereIn('id', [...new Set(links.map((link) => link.prop_id))]).where({ user_id: userId }) : [];
+      const byId = new Map(props.map((prop) => [prop.id, prop]));
+      const grouped = {};
+      for (const link of links) {
+        const prop = byId.get(link.prop_id);
+        if (!prop) continue;
+        if (!grouped[link.scene_id]) grouped[link.scene_id] = [];
+        grouped[link.scene_id].push({ id: prop.id, name: prop.name, state: link.state || '' });
+      }
+      return grouped;
+    })(),
+    props: await (async () => {
+      const rows = await db('film_props').where({ user_id: userId }).where((q) => q.where({ film_id: filmId }).orWhereNull('film_id'));
+      return rows.map((row) => ({ id: row.id, name: row.name, category: row.category, description: row.description, color: row.color }));
+    })(),
     characters,
     locations,
     estimate,

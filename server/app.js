@@ -20,6 +20,7 @@ import { settingsRouter } from './routes/settings.js';
 import { analyticsRouter } from './routes/analytics.js';
 import { billingRouter, stripeWebhookHandler } from './routes/billing.js';
 import { adminRouter } from './routes/admin.js';
+import { filmAdminRouter } from './routes/film-admin.js';
 import { contactRouter } from './routes/contact.js';
 import { filmRouter } from './routes/films.js';
 
@@ -85,6 +86,7 @@ export async function createApp() {
   app.use('/api/analytics', analyticsRouter());
   app.use('/api/billing', billingRouter());
   app.use('/api/admin', adminRouter());
+  app.use('/api/admin/film', filmAdminRouter());
   app.use('/api/contact', contactRouter());
   app.use('/api/films', filmRouter());
   app.use('/api', contentRouter());

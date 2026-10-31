@@ -11,11 +11,12 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { db, now, newId, number, parseJson } from '../db.js';
+import { db, now, newId, number, parseJson, addJob } from '../db.js';
 import { AppError } from '../errors.js';
 import { ensureProjectDir } from '../media/utils.js';
 import { generatePromptImage, imageProviderStatus } from '../media/images.js';
 import { ownedFilm, scenePrompt } from './scenes.js';
+import { scenePropsForPrompt } from './propPrompt.js';
 
 const STORYBOARD_SUFFIX = 'Storyboard still frame for a film shot. Single cinematic image, correct composition, no text, no subtitles, no watermark, no logo, no collage.';
 
@@ -134,7 +135,7 @@ export async function generateStoryboard(userId, filmId, input = {}, role = 'use
   const errors = [];
   for (const scene of targets) {
     const location = scene.location_id ? locationById.get(scene.location_id) : null;
-    const prompt = `${scenePrompt(film, scene, characters, location)} ${STORYBOARD_SUFFIX}`.slice(0, 2000);
+    const prompt = `${scenePrompt(film, scene, characters, location, await scenePropsForPrompt(filmId, scene.id))} ${STORYBOARD_SUFFIX}`.slice(0, 2000);
     const outputPath = path.join(dir, `scene-${String(number(scene.ordinal)).padStart(4, '0')}.png`);
     await upsertFrame({
       filmId, sceneId: scene.id, kind: 'scene',
@@ -239,4 +240,43 @@ export async function generateCharacterConcept(userId, filmId, characterId, role
     concept: frameView(frame), provider: status, ai: result.ai,
     usedAsReference: Boolean(result.ai && !character.reference_image_path),
   };
+}
+
+/**
+ * Background queueing for long films: a 120-scene storyboard would otherwise
+ * need five manual requests and hold an HTTP connection open for minutes.
+ */
+export async function queueStoryboard(userId, filmId, input = {}, role = 'user') {
+  const data = storyboardSchema.parse(input);
+  const film = await ownedFilm(userId, filmId, role);
+  const status = imageProviderStatus();
+  if (!status.configured) {
+    throw new AppError(503, 'image_provider_unavailable', `Storyboard stills need an image provider. IMAGE_PROVIDER=${status.provider} has no credentials.`);
+  }
+  const scenes = await db('film_scenes').where({ film_id: filmId });
+  if (!scenes.length) throw new AppError(409, 'no_scenes', 'Write a screenplay first — there are no scenes to storyboard.');
+  const frames = await db('film_storyboard_frames').where({ film_id: filmId, kind: 'scene' });
+  const done = new Set(frames.filter((frame) => frame.path && fs.existsSync(frame.path)).map((frame) => frame.scene_id));
+  const remaining = data.force ? scenes.length : scenes.filter((scene) => !done.has(scene.id)).length;
+  const jobId = await addJob('film_storyboard_batch', { filmId, userId, force: data.force }, { maxAttempts: 2 });
+  return { queued: true, jobId, remaining, provider: status, film: { id: film.id, title: film.title } };
+}
+
+/** Worker entry point: renders until the board is complete (bounded per job). */
+export async function processStoryboardBatchJob({ filmId, userId, force = false } = {}) {
+  let generated = 0;
+  let failed = 0;
+  let rounds = 0;
+  while (rounds < 8) {
+    const result = await generateStoryboard(userId, filmId, { force: force && rounds === 0, limit: 60 });
+    generated += result.generated;
+    failed += result.failed;
+    rounds += 1;
+    if (!result.generated && !result.failed) break;
+    if (!result.remaining) break;
+  }
+  const scenes = await db('film_scenes').where({ film_id: filmId });
+  const frames = await db('film_storyboard_frames').where({ film_id: filmId, kind: 'scene' });
+  const done = frames.filter((frame) => frame.path && fs.existsSync(frame.path)).length;
+  return { generated, failed, scenes: scenes.length, withStill: done, complete: done >= scenes.length };
 }

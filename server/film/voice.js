@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { db, now, number, parseJson } from '../db.js';
+import { db, now, number, parseJson, addJob } from '../db.js';
 import { AppError } from '../errors.js';
 import { ensureProjectDir, probeVideo } from '../media/utils.js';
 import { activeTtsProvider, synthesizeScene } from '../media/audio.js';
@@ -144,6 +144,39 @@ export async function generateVoiceTakes(userId, filmId, input = {}, role = 'use
     takes,
     remaining: Math.max(0, spoken.length - targets.length - takes.length),
   };
+}
+
+/** Queue take recording for every spoken scene that is still silent. */
+export async function queueVoiceTakes(userId, filmId, input = {}, role = 'user') {
+  const data = voiceSchema.parse(input);
+  const film = await ownedFilm(userId, filmId, role);
+  const tts = ttsStatus();
+  if (!tts.configured) throw new AppError(503, 'tts_unavailable', tts.error || 'No text-to-speech provider is configured.');
+  const scenes = await db('film_scenes').where({ film_id: filmId });
+  const spoken = scenes.filter((scene) => sceneLines(scene).length);
+  if (!spoken.length) throw new AppError(409, 'no_dialogue', 'No scene has dialogue yet.');
+  const missing = spoken.filter((scene) => data.force || !scene.voice_path || !fs.existsSync(scene.voice_path)).length;
+  const jobId = await addJob('film_voice_batch', { filmId, userId, force: data.force }, { maxAttempts: 2 });
+  return { queued: true, jobId, remaining: missing, provider: tts.provider, film: { id: film.id, title: film.title } };
+}
+
+/** Worker entry point: records takes until every spoken scene has one. */
+export async function processVoiceBatchJob({ filmId, userId, force = false } = {}) {
+  let generated = 0;
+  let failed = 0;
+  let rounds = 0;
+  while (rounds < 8) {
+    const result = await generateVoiceTakes(userId, filmId, { force: force && rounds === 0, limit: 40 });
+    generated += result.generated;
+    failed += result.failed;
+    rounds += 1;
+    if (!result.generated && !result.failed) break;
+    if (!result.remaining) break;
+  }
+  const scenes = await db('film_scenes').where({ film_id: filmId });
+  const spoken = scenes.filter((scene) => sceneLines(scene).length);
+  const withTake = spoken.filter((scene) => scene.voice_path && fs.existsSync(scene.voice_path)).length;
+  return { generated, failed, spoken: spoken.length, withTake, complete: withTake >= spoken.length };
 }
 
 export async function sceneTakePath(userId, filmId, sceneId, role = 'user') {

@@ -234,3 +234,12 @@
   .film-mini-field { flex: 1 1 90px; }
   .film-mini-field .input { width: 100%; }
 }
+
+/* Multi-track editor: collapsible per-scene speed / look / overlay controls. */
+.film-track-editor { flex-basis: 100%; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--border-soft, rgba(255, 255, 255, 0.12)); }
+.film-track-editor > summary { cursor: pointer; font-size: 12px; opacity: 0.75; list-style: none; }
+.film-track-editor > summary::-webkit-details-marker { display: none; }
+.film-track-editor > summary::before { content: '▸ '; }
+.film-track-editor[open] > summary::before { content: '▾ '; }
+.film-track-editor[open] > summary { opacity: 1; }
+.film-track-editor .film-timeline-controls { flex-wrap: wrap; }

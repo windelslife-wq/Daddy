@@ -22,7 +22,9 @@ export function StoryboardStep({ film }) {
     try {
       const result = await post(`/api/films/${film.id}/storyboard`, body);
       await reload({ silent: true });
-      showToast(result.generated ? `${result.generated} still(s) rendered with ${result.provider.active}.` : 'Every scene already has a still.', 'success');
+      showToast(result.queued
+        ? `Queued ${result.remaining} still(s) for the worker. This page refreshes as frames appear.`
+        : result.generated ? `${result.generated} still(s) rendered with ${result.provider.active}.` : 'Every scene already has a still.', 'success');
     } catch (err) { setError(err); }
     finally { setPending(null); }
   }
@@ -67,6 +69,9 @@ export function StoryboardStep({ film }) {
           </Button>
           <Button variant="secondary" onClick={() => generate({ force: true, limit: 8 }, 'refresh')} disabled={Boolean(pending)}>
             {pending === 'refresh' ? <Spinner size={14} /> : <><RefreshCw size={14} /> Re-render 8 stills</>}
+          </Button>
+          <Button variant="ghost" onClick={() => generate({ queue: true }, 'queue')} disabled={Boolean(pending)}>
+            {pending === 'queue' ? <Spinner size={14} /> : <><RefreshCw size={14} /> Render all in background</>}
           </Button>
           <Button variant="secondary" onClick={poster} disabled={Boolean(pending)}>
             {pending === 'poster' ? <Spinner size={14} /> : <><FilmIcon size={14} /> {data.poster ? 'Re-render poster' : 'Render poster'}</>}
@@ -124,7 +129,9 @@ export function VoiceStep({ film }) {
     try {
       const result = await post(`/api/films/${film.id}/voice`, body);
       await reload({ silent: true });
-      showToast(result.generated ? `${result.generated} take(s) recorded with ${result.provider}.` : 'Every spoken scene already has a take.', 'success');
+      showToast(result.queued
+        ? `Queued ${result.remaining} take(s) for the worker. This page refreshes as they arrive.`
+        : result.generated ? `${result.generated} take(s) recorded with ${result.provider}.` : 'Every spoken scene already has a take.', 'success');
     } catch (err) { setError(err); }
     finally { setPending(null); }
   }
@@ -153,6 +160,9 @@ export function VoiceStep({ film }) {
           </Button>
           <Button variant="secondary" onClick={() => generate({ force: true, limit: 6 }, 'redo')} disabled={Boolean(pending) || !data.tts.configured}>
             {pending === 'redo' ? <Spinner size={14} /> : <><RefreshCw size={14} /> Re-record 6 takes</>}
+          </Button>
+          <Button variant="ghost" onClick={() => generate({ queue: true }, 'queue')} disabled={Boolean(pending) || !data.tts.configured}>
+            {pending === 'queue' ? <Spinner size={14} /> : <><Mic2 size={14} /> Record all in background</>}
           </Button>
         </div>
 
@@ -203,13 +213,65 @@ export function VoiceStep({ film }) {
 export function TimelineStep({ film, reload }) {
   const { showToast } = useToast();
   const [drafts, setDrafts] = useState({});
+  const [splitPoints, setSplitPoints] = useState({});
+  const [tracks, setTracks] = useState({});
   const [pending, setPending] = useState(null);
   const [error, setError] = useState(null);
   const scenes = film.scenes || [];
+  const vfx = useLoad(() => get('/api/films/vfx'), [], { initial: null });
+  const lipSync = useLoad(() => get('/api/films/lipsync'), [], { initial: null });
   const total = useMemo(() => scenes.reduce((sum, scene) => sum + Number(scene.durationSeconds || 0), 0), [scenes]);
 
   const valueFor = (scene, key) => drafts[scene.id]?.[key] ?? scene[key] ?? (key === 'transition' ? 'cut' : 0);
   const update = (scene, key, value) => setDrafts((current) => ({ ...current, [scene.id]: { ...current[scene.id], [key]: value } }));
+
+  async function split(scene) {
+    const at = Number(splitPoints[scene.id]);
+    if (!Number.isFinite(at)) return;
+    setPending(`split-${scene.id}`); setError(null);
+    try {
+      const result = await post(`/api/films/${film.id}/scenes/${scene.id}/split`, { atSeconds: at });
+      setSplitPoints((current) => ({ ...current, [scene.id]: '' }));
+      await reload({ silent: true });
+      showToast(`Scene split into ${result.first.durationSeconds}s + ${result.second.durationSeconds}s.`, 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setPending(null); }
+  }
+
+  const trackFor = (scene) => tracks[scene.id] || {
+    speedFactor: scene.speedFactor || 1,
+    vfxPreset: scene.vfxPreset || 'none',
+    overlayText: scene.overlay?.text || '',
+    overlayStart: scene.overlay?.startSeconds ?? 0,
+    overlayEnd: scene.overlay?.endSeconds ?? 0,
+  };
+  const setTrack = (scene, key, value) => setTracks((current) => ({ ...current, [scene.id]: { ...trackFor(scene), [key]: value } }));
+
+  async function applyTrack(scene) {
+    const track = trackFor(scene);
+    setPending(`track-${scene.id}`); setError(null);
+    try {
+      await post(`/api/films/${film.id}/scenes/${scene.id}/track`, {
+        speedFactor: Number(track.speedFactor) || 1,
+        vfxPreset: track.vfxPreset,
+        overlay: track.overlayText.trim()
+          ? { text: track.overlayText, startSeconds: Number(track.overlayStart) || 0, endSeconds: Number(track.overlayEnd) || 0 }
+          : null,
+      });
+      await reload({ silent: true });
+      showToast(`Scene ${scene.ordinal}: speed, look and overlay saved for the next render.`, 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setPending(null); }
+  }
+
+  async function runProvider(scene, kind) {
+    setPending(`${kind}-${scene.id}`); setError(null);
+    try {
+      const result = await post(`/api/films/${film.id}/scenes/${scene.id}/${kind}`, kind === 'motion' ? { motionPrompt: scene.visualPrompt || '' } : {});
+      showToast(`${kind === 'motion' ? 'Motion transfer' : 'Lip-sync'} queued (job ${result.jobId}) with ${result.provider}.`, 'success');
+    } catch (err) { setError(err); showToast(err.message, 'error'); }
+    finally { setPending(null); }
+  }
 
   async function save(scene) {
     setPending(scene.id); setError(null);
@@ -244,6 +306,11 @@ export function TimelineStep({ film, reload }) {
               <div className="film-row-main">
                 <strong>{String(scene.ordinal).padStart(2, '0')} · {scene.heading || scene.location || 'Untitled scene'}</strong>
                 <small>{formatDuration(scene.durationSeconds)} · {scene.hasClip ? 'clip ready' : 'no clip yet'} · {scene.hasVoiceTake ? 'voice take' : 'no take'}</small>
+                <small>
+                  {(film.sceneProps?.[scene.id] || []).length
+                    ? `Props: ${(film.sceneProps[scene.id] || []).map((prop) => `${prop.name}${prop.state ? ` (${prop.state})` : ''}`).join(', ')}`
+                    : 'No props linked'}
+                </small>
               </div>
               <div className="film-timeline-controls">
                 <label className="film-mini-field">
@@ -262,10 +329,57 @@ export function TimelineStep({ film, reload }) {
                   <span>Trim end (s)</span>
                   <input className="input" type="number" min="0" max="30" step="0.1" value={valueFor(scene, 'trimEnd')} onChange={(event) => update(scene, 'trimEnd', event.target.value)} />
                 </label>
+                <label className="film-mini-field">
+                  <span>Split at (s)</span>
+                  <input className="input" type="number" min="4" max={Math.max(4, scene.durationSeconds - 4)} step="0.5" value={splitPoints[scene.id] || ''} onChange={(event) => setSplitPoints({ ...splitPoints, [scene.id]: event.target.value })} />
+                </label>
+                <Button size="sm" variant="ghost" onClick={() => split(scene)} disabled={pending === `split-${scene.id}` || !splitPoints[scene.id]}>
+                  {pending === `split-${scene.id}` ? <Spinner size={13} /> : <><Scissors size={13} /> Split</>}
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => save(scene)} disabled={pending === scene.id || !drafts[scene.id]}>
                   {pending === scene.id ? <Spinner size={13} /> : <><Save size={13} /> Apply</>}
                 </Button>
               </div>
+              <details className="film-track-editor" style={{ flexBasis: '100%' }}>
+                <summary>Track: speed {Number(scene.speedFactor || 1).toFixed(2)}× · {pretty(scene.vfxPreset && scene.vfxPreset !== 'none' ? scene.vfxPreset : 'no look')}{scene.overlay?.text ? ' · text overlay' : ''}</summary>
+                <div className="film-timeline-controls" style={{ marginTop: 8 }}>
+                  <label className="film-mini-field">
+                    <span>Speed</span>
+                    <input className="input" type="number" min="0.25" max="4" step="0.05" value={trackFor(scene).speedFactor} onChange={(event) => setTrack(scene, 'speedFactor', event.target.value)} />
+                  </label>
+                  <label className="film-mini-field">
+                    <span>Look (VFX)</span>
+                    <select className="input" value={trackFor(scene).vfxPreset} onChange={(event) => setTrack(scene, 'vfxPreset', event.target.value)}>
+                      {(vfx.data?.presets || [{ id: 'none', label: 'None' }]).map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="film-mini-field" style={{ flex: 2 }}>
+                    <span>Overlay text</span>
+                    <input className="input" maxLength={120} value={trackFor(scene).overlayText} placeholder="e.g. Three days later" onChange={(event) => setTrack(scene, 'overlayText', event.target.value)} />
+                  </label>
+                  <label className="film-mini-field">
+                    <span>Show from (s)</span>
+                    <input className="input" type="number" min="0" step="0.1" value={trackFor(scene).overlayStart} onChange={(event) => setTrack(scene, 'overlayStart', event.target.value)} />
+                  </label>
+                  <label className="film-mini-field">
+                    <span>Show until (s)</span>
+                    <input className="input" type="number" min="0" step="0.1" value={trackFor(scene).overlayEnd} onChange={(event) => setTrack(scene, 'overlayEnd', event.target.value)} />
+                  </label>
+                  <Button size="sm" variant="secondary" onClick={() => applyTrack(scene)} disabled={pending === `track-${scene.id}`}>
+                    {pending === `track-${scene.id}` ? <Spinner size={13} /> : <><Save size={13} /> Apply track</>}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => runProvider(scene, 'lipsync')} disabled={!lipSync.data?.configured || !scene.hasClip || pending === `lipsync-${scene.id}`} title={lipSync.data?.configured ? 'Re-sync the clip to the voice take' : lipSync.data?.note || 'Requires a lip-sync provider key'}>
+                    {pending === `lipsync-${scene.id}` ? <Spinner size={13} /> : <><Mic2 size={13} /> Sync lips{lipSync.data?.configured ? '' : ' (needs key)'}</>}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => runProvider(scene, 'motion')} disabled={!vfx.data?.motion?.configured || !scene.hasPoster || pending === `motion-${scene.id}`} title={vfx.data?.motion?.configured ? 'Animate the storyboard still with a motion model' : vfx.data?.motion?.note || 'Requires a motion provider key'}>
+                    {pending === `motion-${scene.id}` ? <Spinner size={13} /> : <>Animate still{vfx.data?.motion?.configured ? '' : ' (needs key)'}</>}
+                  </Button>
+                </div>
+                <small className="film-provider-note">
+                  Speed, look and the text overlay are burned in by FFmpeg during the next render. Lip-sync and motion transfer need a provider key;
+                  without one the server refuses with 503 and nothing changes.
+                </small>
+              </details>
             </div>
           ))}
         </div>
@@ -279,14 +393,22 @@ export function TimelineStep({ film, reload }) {
             <div className="film-breakdown-row"><span>Fades</span><strong>{scenes.filter((scene) => scene.transition && scene.transition !== 'cut').length}</strong></div>
             <div className="film-breakdown-row"><span>Trimmed scenes</span><strong>{scenes.filter((scene) => Number(scene.trimStart) || Number(scene.trimEnd)).length}</strong></div>
             <div className="film-breakdown-row"><span>Voice takes</span><strong>{scenes.filter((scene) => scene.hasVoiceTake).length}</strong></div>
+            <div className="film-breakdown-row"><span>Speed-ramped</span><strong>{scenes.filter((scene) => Number(scene.speedFactor || 1) !== 1).length}</strong></div>
+            <div className="film-breakdown-row"><span>Looks applied</span><strong>{scenes.filter((scene) => scene.vfxPreset && scene.vfxPreset !== 'none').length}</strong></div>
+            <div className="film-breakdown-row"><span>Text overlays</span><strong>{scenes.filter((scene) => scene.overlay?.text).length}</strong></div>
           </div>
           <p className="film-provider-note">Sound effects, score and subtitles are configured in Assemble. Any edit here invalidates the current render, so re-render before exporting.</p>
           <Button size="sm" variant="secondary" className="btn-block" to={`/app/films/project/${film.id}?step=render`}><Clapperboard size={14} /> Go to assemble</Button>
         </Card>
         <Card title="Editing limits" subtitle="Honest scope" icon={Info}>
           <p className="film-provider-note" style={{ marginTop: 0 }}>
-            Trims, fades, reordering, music, SFX and subtitles are real. Frame-accurate multi-track compositing,
-            speed ramps and animated overlays are not implemented yet and are not offered as controls.
+            Trims, fades, reordering, music, SFX and subtitles are real. Speed ramps (0.25×–4×), eight local VFX looks
+            and timed text overlays are burned in by FFmpeg at render time. Picture-in-picture images, keyframed
+            animation and separate music stems are not implemented and are not offered as controls.
+          </p>
+          <p className="film-provider-note">
+            Lip-sync and motion transfer are queued against Replicate/fal only when a key and an explicit model id are
+            configured; otherwise the API answers 503 and the buttons stay disabled.
           </p>
         </Card>
       </div>

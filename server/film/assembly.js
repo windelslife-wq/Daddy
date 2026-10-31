@@ -24,6 +24,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, now, number, parseJson } from '../db.js';
+import { logger } from '../logger.js';
 import { config } from '../config.js';
 import { AppError } from '../errors.js';
 import {
@@ -31,6 +32,7 @@ import {
   dimensionsFor, concatEscape, writeSrt, formatFfmpegDuration,
 } from '../media/utils.js';
 import { synthesizeScene, readWav, writeWav, resamplePcm, activeTtsProvider } from '../media/audio.js';
+import { editFilters, sceneOverlay } from './editing.js';
 
 const SAMPLE_RATE = 24000;
 const FPS = 24;
@@ -126,12 +128,15 @@ async function normaliseClip(clipPath, outputPath, durationSeconds, width, heigh
       fades.push(`fade=t=out:st=${(visible - fade).toFixed(3)}:d=${fade}:color=${color}`);
     }
   }
+  // Multi-track editorial layer (speed ramp, VFX preset, burned text overlay).
+  const editLayer = edit.scene ? editFilters({ scene: edit.scene, width, height, visible }) : [];
   const filter = [
     `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
     `fps=${FPS}`, 'setsar=1',
     'tpad=stop_mode=clone:stop_duration=10',
     `trim=duration=${duration}`, 'setpts=PTS-STARTPTS',
+    ...editLayer,
     ...fades,
     'format=yuv420p',
   ].join(',');
@@ -293,7 +298,7 @@ export async function assembleFilm(filmId, {
     await normaliseClip(scene.clip_path, output, sceneSeconds, width, height, (ratio) => {
       const overall = 4 + ((i + ratio) / scenes.length) * 48;
       onProgress(Math.round(Math.min(52, overall)), 'normalising_clips').catch(() => {});
-    }, { trimStart: scene.trim_start, trimEnd: scene.trim_end, transition: scene.transition });
+    }, { trimStart: scene.trim_start, trimEnd: scene.trim_end, transition: scene.transition, scene });
     normalised.push(output);
     await onProgress(Math.round(4 + ((i + 1) / scenes.length) * 48), 'normalising_clips');
   }
@@ -363,16 +368,29 @@ export async function assembleFilm(filmId, {
   if (shouldCancel()) throw cancelledError();
 
   // 4. Mix background music under dialogue (video stream is copied).
+  //    The music is side-chain compressed by the dialogue so lines stay
+  //    intelligible without raising the whole track; if the filter is
+  //    unavailable on this FFmpeg build we fall back to a static bed.
   let mixedPath = basePath;
   if (film.music_path && fsSync.existsSync(film.music_path)) {
     mixedPath = path.join(workDir, 'with-music.mp4');
-    await ffmpegWithProgress([
+    const mixArgs = (filter) => [
       '-i', basePath, '-stream_loop', '-1', '-i', film.music_path,
-      '-filter_complex', '[1:a]volume=0.16[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[aout]',
+      '-filter_complex', filter,
       '-map', '0:v:0', '-map', '[aout]',
       '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2',
       '-t', formatFfmpegDuration(duration), '-movflags', '+faststart', mixedPath,
-    ], { durationSeconds: duration, shouldCancel });
+    ];
+    const ducked = '[1:a]volume=0.55[m];[m][0:a]sidechaincompress=threshold=0.03:ratio=12:attack=5:release=250:makeup=1[md];[0:a][md]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]';
+    const staticBed = '[1:a]volume=0.16[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=0[aout]';
+    try {
+      await ffmpegWithProgress(mixArgs(ducked), { durationSeconds: duration, shouldCancel });
+      await onProgress(88, 'music_ducking');
+    } catch (error) {
+      if (shouldCancel()) throw cancelledError();
+      logger.warn({ err: { message: error.message } }, 'Sidechain music ducking failed; falling back to a static bed');
+      await ffmpegWithProgress(mixArgs(staticBed), { durationSeconds: duration, shouldCancel });
+    }
     await fs.rm(basePath, { force: true });
     await onProgress(90, 'music');
   }

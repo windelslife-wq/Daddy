@@ -29,6 +29,7 @@ import {
   ownedFilm, queueFilmScenes, pauseFilmGeneration, resumeFilmGeneration,
   cancelFilmGeneration, cancelSceneGeneration, retryFailedScenes, filmProgress,
   cancelFilmAssembly, addSfxAsset, deleteSfxAsset, sfxAssetList, validateSceneProvider,
+  splitScene, cloneCharacter, castLibrary,
 } from '../film/scenes.js';
 import { assemblyPreflight } from '../film/assembly.js';
 import { cinematographyCatalog } from '../film/cinematography.js';
@@ -39,12 +40,23 @@ import {
 import { filmQualityReport } from '../film/continuity.js';
 import {
   storyboardOverview, generateStoryboard, generatePoster, generateCharacterConcept, ownedFrame,
+  queueStoryboard,
 } from '../film/storyboard.js';
-import { voiceOverview, generateVoiceTakes, sceneTakePath } from '../film/voice.js';
+import { voiceOverview, generateVoiceTakes, sceneTakePath, queueVoiceTakes } from '../film/voice.js';
 import {
   createFlow, listFlows, updateFlow, deleteFlow, runFlow, ownedFlow, flowArtifact, flowView, NODE_TYPES,
 } from '../film/canvas.js';
 import { listModels } from '../film/models.js';
+import { editingOverview, updateSceneTrack, listVfxPresets } from '../film/editing.js';
+import { lipSyncStatus, sceneLipSync, queueLipSync } from '../film/lipsync.js';
+import { vfxOverview, motionStatus, sceneMotionStatus, queueMotionTransfer } from '../film/vfx.js';
+import {
+  listProps, createProp, updateProp, deleteProp, setSceneProps,
+} from '../film/props.js';
+import {
+  listBrandKits, upsertBrandKit, deleteBrandKit, attachBrandKit,
+  adVariants, generateAdVariations, applyAdVariant,
+} from '../film/ads.js';
 import {
   startProduction, productionSnapshot, advanceProduction, cancelProduction,
   listProductions, PRODUCTION_STAGES,
@@ -174,9 +186,57 @@ export function filmRouter() {
     res.json({ productions: await listProductions(req.user.id), stages: PRODUCTION_STAGES });
   }));
 
+  // ---- Props library (continuity) -----------------------------------------
+  router.get('/props', h(async (req, res) => {
+    res.json({ props: await listProps(req.user.id, { filmId: req.query.filmId }) });
+  }));
+
+  router.post('/props', h(async (req, res) => {
+    res.status(201).json({ prop: await createProp(req.user.id, req.body?.filmId || req.query.filmId || null, req.body || {}, req.user.role) });
+  }));
+
+  router.patch('/props/:propId', h(async (req, res) => {
+    res.json({ prop: await updateProp(req.user.id, req.params.propId, req.body || {}) });
+  }));
+
+  router.delete('/props/:propId', h(async (req, res) => {
+    res.json(await deleteProp(req.user.id, req.params.propId));
+  }));
+
+  // ---- Brand kits / advertisement studio ----------------------------------
+  router.get('/brand-kits', h(async (req, res) => {
+    res.json({ brandKits: await listBrandKits(req.user.id) });
+  }));
+
+  router.post('/brand-kits', h(async (req, res) => {
+    res.status(201).json({ brandKit: await upsertBrandKit(req.user.id, req.body || {}) });
+  }));
+
+  router.delete('/brand-kits/:brandKitId', h(async (req, res) => {
+    res.json(await deleteBrandKit(req.user.id, req.params.brandKitId));
+  }));
+
+  // ---- Reusable cast library ----------------------------------------------
+  router.get('/cast-library', h(async (req, res) => {
+    res.json({ characters: await castLibrary(req.user.id) });
+  }));
+
   // ---- Model marketplace (live readiness, no fake activation) --------------
   router.get('/models', h(async (req, res) => {
     res.json(listModels());
+  }));
+
+  // ---- Multi-track edit / VFX / lip-sync ----------------------------------
+  router.get('/vfx', h(async (req, res) => {
+    res.json({ ...(await vfxOverview()), presets: listVfxPresets() });
+  }));
+
+  router.get('/lipsync', h(async (req, res) => {
+    res.json(lipSyncStatus());
+  }));
+
+  router.get('/motion', h(async (req, res) => {
+    res.json(motionStatus());
   }));
 
   // ---- Creative canvas -----------------------------------------------------
@@ -256,6 +316,10 @@ export function filmRouter() {
   }));
 
   // ---- Character studio ----------------------------------------------------
+  router.post('/characters/:characterId/clone', h(async (req, res) => {
+    res.status(201).json({ character: await cloneCharacter(req.user.id, req.params.characterId, req.body?.filmId || null, req.user.role) });
+  }));
+
   router.get('/characters', h(async (req, res) => {
     res.json({ characters: await listCharacters(req.user.id, { filmId: req.query.filmId, seriesId: req.query.seriesId }) });
   }));
@@ -418,6 +482,10 @@ export function filmRouter() {
   }));
 
   router.post('/:id/storyboard', h(async (req, res) => {
+    if (req.body?.queue) {
+      res.status(202).json(await queueStoryboard(req.user.id, req.params.id, req.body || {}, req.user.role));
+      return;
+    }
     res.json(await generateStoryboard(req.user.id, req.params.id, req.body || {}, req.user.role));
   }));
 
@@ -441,12 +509,68 @@ export function filmRouter() {
     res.json(await generateCharacterConcept(req.user.id, req.params.id, req.params.characterId, req.user.role));
   }));
 
+  // ---- Advertisement studio (brand kit + variations) ----------------------
+  router.get('/:id/ads', h(async (req, res) => {
+    res.json(await adVariants(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/ads/attach', h(async (req, res) => {
+    const brandKitId = req.body?.brandKitId || null;
+    res.json(await attachBrandKit(req.user.id, req.params.id, brandKitId, req.user.role));
+  }));
+
+  router.post('/:id/ads/variations', h(async (req, res) => {
+    res.json(await generateAdVariations(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/ads/variations/:variantId/apply', h(async (req, res) => {
+    res.json(await applyAdVariant(req.user.id, req.params.id, req.params.variantId, req.user.role));
+  }));
+
+  // ---- Editing: scene props and splitting --------------------------------
+  router.put('/:id/scenes/:sceneId/props', h(async (req, res) => {
+    res.json({ props: await setSceneProps(req.user.id, req.params.id, req.params.sceneId, req.body?.props || [], req.user.role) });
+  }));
+
+  router.post('/:id/scenes/:sceneId/split', h(async (req, res) => {
+    res.json(await splitScene(req.user.id, req.params.id, req.params.sceneId, req.body?.atSeconds, req.user.role));
+  }));
+
+  // ---- Editing tracks, VFX and lip-sync (per scene) -----------------------
+  router.get('/:id/editing', h(async (req, res) => {
+    res.json(await editingOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/track', h(async (req, res) => {
+    res.json(await updateSceneTrack(req.user.id, req.params.id, req.params.sceneId, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/lipsync', h(async (req, res) => {
+    res.json(await sceneLipSync(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/lipsync', h(async (req, res) => {
+    res.status(202).json(await queueLipSync(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/motion', h(async (req, res) => {
+    res.json(await sceneMotionStatus(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/motion', h(async (req, res) => {
+    res.status(202).json(await queueMotionTransfer(req.user.id, req.params.id, req.params.sceneId, req.body || {}, req.user.role));
+  }));
+
   // ---- Voice takes ---------------------------------------------------------
   router.get('/:id/voice', h(async (req, res) => {
     res.json(await voiceOverview(req.user.id, req.params.id, req.user.role));
   }));
 
   router.post('/:id/voice', h(async (req, res) => {
+    if (req.body?.queue) {
+      res.status(202).json(await queueVoiceTakes(req.user.id, req.params.id, req.body || {}, req.user.role));
+      return;
+    }
     res.json(await generateVoiceTakes(req.user.id, req.params.id, req.body || {}, req.user.role));
   }));
 
@@ -548,7 +672,14 @@ export function filmRouter() {
   }));
 
   router.patch('/:id/scenes/:sceneId', h(async (req, res) => {
-    res.json({ scene: await updateScene(req.user.id, req.params.id, req.params.sceneId, patchSceneSchema.parse(req.body || {}), req.user.role) });
+    const data = patchSceneSchema.parse(req.body || {});
+    const scene = await updateScene(req.user.id, req.params.id, req.params.sceneId, data, req.user.role);
+    // Props are linked separately so one request can update review notes and the
+    // prop continuity list together.
+    if (Array.isArray(req.body?.props)) {
+      await setSceneProps(req.user.id, req.params.id, req.params.sceneId, req.body.props, req.user.role);
+    }
+    res.json({ scene });
   }));
 
   router.delete('/:id/scenes/:sceneId', h(async (req, res) => {

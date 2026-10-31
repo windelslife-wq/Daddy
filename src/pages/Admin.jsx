@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Activity, AlertCircle, BarChart3, CheckCircle2, Cpu, KeyRound, ListChecks, Mail,
+  Activity, AlertCircle, BarChart3, CheckCircle2, Clapperboard, Cpu, KeyRound, ListChecks, Mail,
   RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
 } from 'lucide-react';
 import { useLoad } from '../hooks.js';
@@ -15,6 +15,7 @@ const tabs = [
   { id: 'jobs', label: 'Jobs', icon: ListChecks },
   { id: 'integrations', label: 'Integrations', icon: Cpu },
   { id: 'activation', label: 'Activation', icon: Rocket },
+  { id: 'film', label: 'Film studio', icon: Clapperboard },
   { id: 'logs', label: 'Audit logs', icon: ShieldCheck },
   { id: 'messages', label: 'Messages', icon: Mail },
 ];
@@ -48,6 +49,7 @@ export default function Admin() {
       overview: '/api/admin/overview', users: '/api/admin/users', plans: '/api/admin/plans',
       settings: '/api/admin/settings', jobs: '/api/admin/jobs', integrations: '/api/admin/integrations',
       activation: '/api/admin/activation',
+      film: '/api/admin/film/ops',
       logs: '/api/admin/audit-logs', messages: '/api/admin/contact-messages',
     };
     return get(endpoints[tab]);
@@ -135,6 +137,14 @@ export default function Admin() {
       supportedPlatforms: settingsForm.supported_platforms || [],
     };
     await action(() => patch('/api/admin/settings', payload), 'Global settings saved.');
+  }
+  async function setFilmProvider(providerId, enabled) {
+    const result = await action(() => post(`/api/admin/film/providers/${encodeURIComponent(providerId)}`, { enabled }), enabled ? 'Provider enabled.' : 'Provider disabled.');
+    if (!result) return;
+  }
+  async function retryFilmJobs() {
+    const result = await action(() => post('/api/admin/film/jobs/retry-failed', {}), 'Failed film jobs requeued.');
+    if (result) showToast(`${result.requeued} job(s) back in the queue.`, 'info');
   }
   async function retryJob(id) { await action(() => post(`/api/admin/jobs/${id}/retry`, {}), 'Job retried.'); }
   async function cancelJob(id) { await action(() => post(`/api/admin/jobs/${id}/cancel`, {}), 'Job cancelled.'); }
@@ -304,6 +314,55 @@ export default function Admin() {
                   ))}</div>
                 )}
               </Card>}
+              {tab === 'film' && data?.providers && (
+                <>
+                  <Card title="Video providers" icon={Clapperboard} subtitle="Disabling a provider removes it from routing immediately — requests fail honestly with 503 instead of silently falling back." action={<Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button>}>
+                    <div className="list">
+                      {data.providers.video.map((provider) => (
+                        <div className="list-item" key={provider.id}>
+                          <div className="list-main">
+                            <strong>{provider.label || provider.id}</strong>
+                            <small>{provider.configured ? 'Credential present' : 'No credential'} · {provider.disabled ? 'disabled in admin' : 'available'}</small>
+                          </div>
+                          <Toggle checked={!provider.disabled} disabled={busy} onChange={(next) => setFilmProvider(provider.id, next)} label={`Enable ${provider.id}`} />
+                        </div>
+                      ))}
+                    </div>
+                    {!data.providers.video.length && <EmptyState icon={Clapperboard} title="No video providers registered" description="The provider registry is empty — check server/film/videoProviders.js." />}
+                  </Card>
+                  <Card title="Render queue" icon={ListChecks} subtitle="Film jobs by type and status.">
+                    {Object.keys(data.queue || {}).length === 0
+                      ? <EmptyState icon={ListChecks} title="Queue is empty" description="No film jobs have run yet." />
+                      : (
+                        <div className="table-wrap"><table><thead><tr><th>Job type</th><th>Statuses</th></tr></thead><tbody>
+                          {Object.entries(data.queue).map(([type, statuses]) => (
+                            <tr key={type}><td>{type}</td><td>{Object.entries(statuses).map(([status, count]) => `${status}: ${count}`).join(' · ')}</td></tr>
+                          ))}
+                        </tbody></table></div>
+                      )}
+                  </Card>
+                  <Card title="Failed film jobs" icon={AlertCircle} subtitle={`${data.renderedFilms} rendered final cut(s)`} action={<Button size="sm" variant="secondary" disabled={busy} onClick={retryFilmJobs}><RefreshCw size={14} /> Requeue failed</Button>}>
+                    {(data.failed || []).length === 0
+                      ? <EmptyState icon={CheckCircle2} title="Nothing failed" description="Every film job either finished or is still queued." />
+                      : (
+                        <div className="list">
+                          {data.failed.map((job) => (
+                            <div className="list-item" key={job.id}>
+                              <div className="list-main"><strong>{job.type}</strong><small>{job.attempts}/{job.maxAttempts} attempts · {job.lastError}</small></div>
+                              <small>{formatDate(job.updated_at)}</small>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </Card>
+                  <Card title="Production snapshot" icon={BarChart3}>
+                    <div className="grid grid-2">
+                      <KeyValue label="Productions" value={Object.entries(data.productions || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none'} />
+                      <KeyValue label="Scenes" value={Object.entries(data.scenes || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none'} />
+                    </div>
+                  </Card>
+                </>
+              )}
             </>
           )}
         </div>

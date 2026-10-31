@@ -34,6 +34,7 @@ import ProductionAgent from './pages/film/ProductionAgent.jsx';
 import CreativeCanvas from './pages/film/CreativeCanvas.jsx';
 import ModelMarketplace from './pages/film/ModelMarketplace.jsx';
 import FilmWorkspace from './pages/film/FilmWorkspace.jsx';
+import AdStudio from './pages/film/AdStudio.jsx';
 import SandboxConsent from './pages/SandboxConsent.jsx';
 import SandboxPost from './pages/SandboxPost.jsx';
 import NotFound from './pages/NotFound.jsx';
@@ -102,6 +103,7 @@ export default function App() {
           <Route path="films/series" element={<FilmStudio view="series" />} />
           <Route path="films/agent" element={<ProductionAgent />} />
           <Route path="films/canvas" element={<CreativeCanvas />} />
+          <Route path="films/ads" element={<AdStudio />} />
           <Route path="films/models" element={<ModelMarketplace />} />
           <Route path="films/scripts" element={<FilmStudio view="scripts" />} />
           <Route path="films/characters" element={<FilmStudio view="characters" />} />
