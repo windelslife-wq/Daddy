@@ -108,6 +108,24 @@ npm start
 
 For a multi-process deployment, run one or more dedicated workers with the same database and `WORKER_ENABLED=true`; use PostgreSQL via `DATABASE_URL`.
 
+### Previewing behind an HTTPS tunnel or sandbox URL
+
+The dev server (`npm run dev`) serves the frontend through Vite middleware and keeps hot
+reloading on a websocket. Many tunnels and sandbox previews do not forward that websocket,
+which leaves the browser retrying a socket it can never reach. Two supported ways to preview:
+
+```bash
+# Recommended for previews: serve the built bundle (no HMR websocket at all)
+npm start            # = vite build + NODE_ENV=production node server/index.js
+
+# Or keep dev mode and point HMR at the tunnel
+HMR_CLIENT_PORT=443 HMR_PROTOCOL=wss npm run dev
+HMR=off npm run dev  # dev mode with hot reload disabled entirely
+```
+
+Set `PUBLIC_BASE_URL` (and `APP_URL`) to the tunnel origin so cookies, OAuth redirects and
+absolute media URLs use the host the browser actually visits.
+
 ---
 
 ## Activating external integrations

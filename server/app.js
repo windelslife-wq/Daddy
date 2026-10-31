@@ -26,6 +26,23 @@ import { filmRouter } from './routes/films.js';
 
 const distDir = path.join(config.root, 'dist');
 
+/**
+ * HMR settings for the dev server. When we are served through an HTTPS tunnel the
+ * browser can only reach the websocket on 443/wss, so the client port must be
+ * overridden; otherwise Vite's client tries the local port and hammers a closed
+ * socket. Set HMR=off to disable the websocket entirely (some sandbox previews do
+ * not forward websocket upgrades at all).
+ */
+function hmrSettings() {
+  const flag = (process.env.HMR || '').toLowerCase();
+  if (['off', 'false', '0', 'none', 'disabled'].includes(flag)) return false;
+  const proxiedHttps = config.publicBaseUrl.startsWith('https://');
+  const clientPort = Number(process.env.HMR_CLIENT_PORT || (proxiedHttps ? 443 : 0)) || undefined;
+  const protocol = process.env.HMR_PROTOCOL || (proxiedHttps ? 'wss' : undefined);
+  if (!clientPort && !protocol) return true;
+  return { ...(clientPort ? { clientPort } : {}), ...(protocol ? { protocol } : {}) };
+}
+
 export async function createApp() {
   await initDb();
   const app = express();
@@ -85,8 +102,10 @@ export async function createApp() {
   app.use('/api/settings', settingsRouter());
   app.use('/api/analytics', analyticsRouter());
   app.use('/api/billing', billingRouter());
-  app.use('/api/admin', adminRouter());
+  // The film admin router is mounted first: its paths live under /api/admin/film
+  // and must not be shadowed by the general admin gate.
   app.use('/api/admin/film', filmAdminRouter());
+  app.use('/api/admin', adminRouter());
   app.use('/api/contact', contactRouter());
   app.use('/api/films', filmRouter());
   app.use('/api', contentRouter());
@@ -101,7 +120,10 @@ export async function createApp() {
         middlewareMode: true,
         host: '0.0.0.0',
         allowedHosts: true,
-        hmr: config.publicBaseUrl.startsWith('https://') ? { clientPort: 443, protocol: 'wss' } : true,
+        // Behind an HTTPS tunnel/proxy the browser reaches HMR through 443/wss,
+        // not through the local port. HMR_CLIENT_PORT / HMR_PROTOCOL / HMR=off
+        // let any preview host adjust this without code changes.
+        hmr: hmrSettings(),
       },
       appType: 'custom',
     });
