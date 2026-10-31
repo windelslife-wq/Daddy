@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { NAV_GROUPS, PRIMARY_NAV, SITE } from '../config/site.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Icon } from './Icon.jsx';
+import { BrandMark } from './BrandMark.jsx';
 import { Footer } from './Footer.jsx';
 import { ThemeSwitcher } from './ThemeSwitcher.jsx';
 
@@ -96,7 +97,7 @@ export function PublicLayout({ children = null }) {
       <header className="site-header">
         <div className="container site-header-inner">
           <Link to="/" className="brand" aria-label={`${SITE.name} home`}>
-            <span className="brand-mark"><Icon name="sparkles" size={18} /></span>
+            <span className="brand-mark"><BrandMark size={38} /></span>
             <span className="brand-copy"><strong>{SITE.name}</strong><small>Creator operations</small></span>
           </Link>
           <nav className="desktop-nav" aria-label="Primary navigation">

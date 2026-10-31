@@ -144,6 +144,13 @@ SHA-256 hashes; revocation is immediate.
 | Key management | `GET/POST /api/developer/keys`, `DELETE /api/developer/keys/:id` |
 | Reference documentation | [`docs/API.md`](docs/API.md) |
 
+### Brand assets
+
+The logo is an aperture mark generated from a single source of truth. `npm run brand:assets`
+writes the favicon set, PWA icons, press kit and social card; the same geometry is drawn
+inline in the app chrome by `src/components/BrandMark.jsx`. Downloads and usage rules are
+on `/press` and in [`docs/BRAND.md`](docs/BRAND.md).
+
 ```bash
 export FCL_API_KEY="fcl_live_…"
 curl "$PUBLIC_BASE_URL/api/v1/me" -H "Authorization: Bearer $FCL_API_KEY"

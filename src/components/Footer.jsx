@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { FOOTER_GROUPS, SITE } from '../config/site.js';
 import { Icon } from './Icon.jsx';
+import { BrandMark } from './BrandMark.jsx';
 import { ThemeSwitcher } from './ThemeSwitcher.jsx';
 
 export function Footer({ compact = false }) {
@@ -11,7 +12,7 @@ export function Footer({ compact = false }) {
         <div className="footer-top">
           <div className="footer-brand">
             <Link to="/" className="brand footer-brand-link" aria-label={`${SITE.name} home`}>
-              <span className="brand-mark"><Icon name="sparkles" size={18} /></span>
+              <span className="brand-mark"><BrandMark size={38} /></span>
               <span className="brand-copy"><strong>{SITE.name}</strong>{!compact && <small>{SITE.tagline}</small>}</span>
             </Link>
             {!compact && <p className="footer-description">{SITE.description} Built for original content and official platform APIs.</p>}

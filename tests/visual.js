@@ -167,6 +167,47 @@ test('professional global website, themes, authentication, workspace, and respon
     assert.ok(await page.locator('.site-footer .footer-column a').count() >= PUBLIC_PAGES.length - 1);
   });
 
+  await t.test('brand favicon, app icons and press kit load from the built site', async () => {
+    const response = await page.goto(base, { waitUntil: 'networkidle' });
+    assert.equal(response.status(), 200);
+    const head = await page.evaluate(() => ({
+      icons: [...document.querySelectorAll('link[rel~="icon"]')].map((link) => ({
+        href: link.getAttribute('href'),
+        type: link.getAttribute('type') || '',
+        sizes: link.getAttribute('sizes') || '',
+      })),
+      apple: document.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href'),
+      og: document.querySelector('meta[property="og:image"]')?.getAttribute('content'),
+      dataUri: [...document.querySelectorAll('link[rel~="icon"]')].some((link) => (link.getAttribute('href') || '').startsWith('data:')),
+    }));
+    assert.equal(head.dataUri, false, 'the favicon must be a real file, not a data URI');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon.svg' && icon.type === 'image/svg+xml'), 'SVG favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon-32.png' && icon.sizes === '32x32'), '32 px favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon-16.png' && icon.sizes === '16x16'), '16 px favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon.ico'), 'ICO fallback missing');
+    assert.equal(head.apple, '/apple-touch-icon.png');
+    assert.match(head.og, /^https:\/\/filmclublens\.com\/brand\/og-image\.png$/, 'social card meta missing');
+
+    for (const asset of ['/favicon.svg', '/favicon.ico', '/favicon-16.png', '/favicon-32.png',
+      '/apple-touch-icon.png', '/icons/icon-192.png', '/icons/icon-maskable-512.png', '/brand/logo-lockup.svg']) {
+      const assetResponse = await page.request.get(base + asset);
+      assert.equal(assetResponse.status(), 200, `${asset} should be served`);
+    }
+    const faviconSvg = await (await page.request.get(base + '/favicon.svg')).text();
+    assert.match(faviconSvg, /#42d9d0/, 'favicon should carry the brand cyan');
+
+    await page.goto(`${base}/press`, { waitUntil: 'networkidle' });
+    const grid = page.locator('.brand-kit-grid');
+    await grid.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('.brand-kit-grid img')].every((img) => img.complete && img.naturalWidth > 0), null, { timeout: 10000 });
+    const cards = await grid.locator('.brand-kit-card').count();
+    assert.equal(cards, 4, 'press page should offer four brand downloads');
+    const downloads = await grid.locator('a[download]').evaluateAll((links) => links.map((link) => link.getAttribute('href')).sort());
+    assert.deepEqual(downloads, ['/brand/logo-lockup-inverse.svg', '/brand/logo-mark-1024.png', '/brand/logo-mark.svg', '/brand/og-image.png']);
+    await assertNoHorizontalOverflow('press brand kit');
+    await screenshot('press-brand-kit.png');
+  });
+
   await t.test('contact form submits through the real backend endpoint', async () => {
     await page.goto(`${base}/contact`, { waitUntil: 'networkidle' });
     await page.getByLabel('Your name').fill('Visual QA');

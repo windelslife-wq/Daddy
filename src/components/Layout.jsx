@@ -8,6 +8,7 @@ import { useLoad } from '../hooks.js';
 import { get, post, formatDate, initials } from '../api.js';
 import { APP_PAGES, FILM_PAGES, NAV_GROUPS, SITE } from '../config/site.js';
 import { Icon } from './Icon.jsx';
+import { BrandMark } from './BrandMark.jsx';
 import { Button, StatusBadge, useToast } from './ui.jsx';
 import { Footer } from './Footer.jsx';
 import { ThemeSwitcher } from './ThemeSwitcher.jsx';
@@ -77,7 +78,7 @@ export default function Layout() {
       <a className="skip-link" href="#workspace-content">Skip to workspace content</a>
       <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
         <div className="brand">
-          <div className="brand-mark"><Icon name="sparkles" size={20} /></div>
+          <div className="brand-mark"><BrandMark size={38} /></div>
           <div><strong>{SITE.name}</strong><span>AI content automation</span></div>
           <button className="icon-btn mobile-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={18} /></button>
         </div>

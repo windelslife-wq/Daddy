@@ -310,6 +310,13 @@ export function Careers() {
   );
 }
 
+const BRAND_ASSETS = [
+  { href: '/brand/logo-mark.svg', title: 'Logo mark', meta: 'SVG · vector', alt: 'Film Club Lens logo mark', dark: false },
+  { href: '/brand/logo-lockup-inverse.svg', title: 'Horizontal lockup', meta: 'SVG · on dark', alt: 'Film Club Lens lockup for dark backgrounds', dark: true, wide: true },
+  { href: '/brand/logo-mark-1024.png', title: 'App icon', meta: 'PNG · 1024 × 1024', alt: 'Film Club Lens app icon', dark: false },
+  { href: '/brand/og-image.png', title: 'Social card', meta: 'PNG · 1200 × 630', alt: 'Film Club Lens social share card', dark: true, wide: true }
+];
+
 export function Press() {
   const factSheet = `${SITE.name}\n${SITE.tagline}\n\n${SITE.description}\n\nWebsite: ${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.example'}\nMedia contact: ${SITE.email}\nSecurity contact: ${SITE.securityEmail}\n\nProduct: AI-assisted faceless video creation, review, scheduling, official social publishing, analytics, and administration.\nDeployment: Local-first evaluation, PostgreSQL production mode, background workers, encrypted credentials, and signed webhooks.\n`;
   return (
@@ -327,6 +334,22 @@ export function Press() {
           <div><span>Security</span><strong>Encrypted credentials, HTTP-only sessions, signed webhooks</strong></div>
           <div><span>Verification</span><strong>Provider simulators, E2E, visual QA, readiness CLI</strong></div>
         </div>
+      </Section>
+      <Section className="section-alt" eyebrow="Brand assets" title="Logos for articles, decks, and store listings" description="Every file below is generated from the same geometry as the app icon and favicon, so nothing you download can drift out of date.">
+        <div className="brand-kit-grid">
+          {BRAND_ASSETS.map((asset) => (
+            <div className="card brand-kit-card" key={asset.href}>
+              <div className={asset.dark ? 'brand-kit-preview dark' : 'brand-kit-preview'}>
+                <img src={asset.href} alt={asset.alt} className={asset.wide ? 'wide' : undefined} loading="lazy" />
+              </div>
+              <div className="brand-kit-meta"><strong>{asset.title}</strong><span>{asset.meta}</span></div>
+              <a className="btn btn-ghost btn-sm" href={asset.href} download><Icon name="download" size={14} /> Download</a>
+            </div>
+          ))}
+        </div>
+        <Callout icon="info" title="Keeping the mark recognisable">
+          Use the violet badge or the lockup as supplied. Keep clear space of at least half the badge width, do not recolour the cyan lens core, and do not place the dark lockup on a light background. Palette: violet <code>#8b7cff</code>, deep violet <code>#5138d8</code>, cyan <code>#42d9d0</code>, night <code>#070a14</code>. Do not imply endorsement or partnership in headlines.
+        </Callout>
       </Section>
       <Section eyebrow="Media contact" title="Request clarification before publishing" description={`For product questions, screenshots, or technical details, contact ${SITE.email}. We can confirm whether a capability is live, local, or dependent on external provider approval.`}>
         <Callout icon="megaphone" title="Please avoid unsupported claims" tone="warning">
