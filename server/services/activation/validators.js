@@ -169,7 +169,7 @@ export const validators = {
 
   httpsOrigin: required((v) => {
     const url = urlOf(v, ['https:']);
-    if (!url) return bad('PUBLIC_BASE_URL must be an absolute HTTPS origin, e.g. https://studio.example.com.');
+    if (!url) return bad('PUBLIC_BASE_URL must be an absolute HTTPS origin, e.g. https://filmclublens.com.');
     if (isLocalHostname(url.hostname)) return bad('PUBLIC_BASE_URL must be a public hostname, not localhost/127.0.0.1/*.local/*.test.');
     if (url.pathname !== '/' || url.search || url.hash) return bad('PUBLIC_BASE_URL should be an origin only — no path, query, or fragment.');
     if (url.username || url.password) return bad('PUBLIC_BASE_URL must not contain credentials.');

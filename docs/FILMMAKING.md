@@ -1,6 +1,6 @@
 # AI Filmmaking Platform — Setup, Providers & Limits
 
-Faceless Studio now includes a professional, **scene-by-scene AI filmmaking** product supporting:
+Film Club Lens now includes a professional, **scene-by-scene AI filmmaking** product supporting:
 
 - **Short dramas** — vertical 9:16 stories for TikTok, YouTube Shorts, Instagram Reels and Facebook.
 - **Long dramas** — multi-scene stories assembled into one continuous film.
@@ -43,6 +43,81 @@ Tables: `film_projects`, `film_scenes`, `film_characters`, `film_series`, `film_
 
 ---
 
+### Directing shots, locations and quality control
+
+Phase 1 of the Film Studio upgrade adds real directorial control instead of a
+single free-text camera field:
+
+- **Shot direction.** Each scene stores `shot_size`, `camera_angle`, `lens`,
+  `lighting`, `color_grade`, `composition` and `camera_movement` from closed
+  vocabularies (`server/film/cinematography.js`). They are validated by the API
+  and translated into a cinematography sentence inside the provider prompt, for
+  example `close-up, low angle looking up at the subject, 85mm lens, shallow
+  depth of field, dolly pushing in, rim lighting, teal and orange grade`.
+  The AI screenplay author and the offline template both fill these in.
+- **Locations library.** Saved locations carry the set description, time of day,
+  weather, palette and style. Linking `location_id` on a scene makes the prompt
+  use that shared production design instead of prose, so later episodes return
+  to the same room. Locations can be project-, series- or user-scoped.
+- **Quality control.** `GET /api/films/:id/qc` audits the cut from persisted
+  state: missing clips, failed generations, undirected scenes, cast members
+  without reference images, speaking names with no character profile, unlinked
+  locations, runtime drift, TTS availability and render status. Each check
+  returns `pass | warn | fail | skip` with evidence; nothing passes by default.
+
+### The AI Production Agent (Phase 2)
+
+`/app/films/agent` turns one written brief into a full, resumable production.
+The agent orchestrates the existing services rather than duplicating them:
+analyse → screenplay → cast → locations → direction run automatically because
+they cost nothing, then **generation** and **assembly** each wait for an explicit
+approval because they spend credits and call a paid provider.
+
+- The brief parser (`server/film/production.js`) derives format, runtime, genre,
+  language and cast size locally, so a run is reproducible without any AI key.
+- Every unique setting in the script becomes a saved location and every scene is
+  linked to it; scenes without direction get a deterministic shot from the
+  cinematography palette.
+- Progress is persisted in `film_productions`, so a restart resumes exactly where
+  the run stopped.
+- A run is marked **completed only when a real MP4 exists**. When a provider is
+  missing the API returns `503 video_provider_unavailable`, the run shows
+  `blocked`, and the exact failing scene numbers are listed with a retry action.
+  Nothing is fabricated and no stage silently succeeds.
+
+The full audit and the remaining phases are documented in
+[docs/FILM-STUDIO-AUDIT.md](FILM-STUDIO-AUDIT.md).
+
+### Storyboards, voice takes, editing and the canvas
+
+- **Storyboard & poster** (`/app/films/project/:id?step=storyboard`). Stills are
+  generated from the same scene prompt the video provider receives, so the frame
+  and the clip agree on cast, location, lens, lighting and grade. With
+  `IMAGE_PROVIDER=procedural` the server renders real PNGs locally (labelled
+  procedural, never AI, never used as a face reference); with
+  `IMAGE_PROVIDER=openai|replicate` they are model-drawn. Posters use the
+  logline and palette; character concept art can become the reference image only
+  when it comes from a real image model.
+- **Voice takes** (`step=voice`). Each scene with dialogue gets a real WAV take
+  from the configured TTS engine (meSpeak offline, OpenAI or ElevenLabs with a
+  key), with measured duration and playback. They are for pacing and line checks;
+  the final mix voices the same lines at assembly.
+- **Timeline** (`step=timeline`). Per scene: trim the head and tail and choose
+  `cut`, `fade_black` or `dip_white`. These are applied by FFmpeg while each clip
+  is normalised, so the stream-copy concat stays fast, and any edit invalidates
+  the previous render.
+- **Creative Canvas** (`/app/films/canvas`). Persisted node flows over the same
+  services: text, screenplay, image, voice and credit-metered scene clips. Flows
+  run in dependency order, cycles are rejected, and a failing node skips its
+  downstream nodes with the real error recorded.
+- **Models & Providers** (`/app/films/models`). Live readiness, limits,
+  capabilities and per-scene credit prices for every configured or missing
+  provider. Activation is an operator action; the page never accepts secrets.
+
+The workspace is a ten-step resumable wizard: setup → screenplay → cast →
+locations → storyboard → direct & generate → voice → timeline → assemble →
+preview.
+
 ## 2. Real AI video providers
 
 Configure one or more providers on the server. `FILM_VIDEO_PROVIDER` is the server default; a project may store its own provider choice (`scene_provider`), which the server validates against the configured list before any request. Keys never leave the server; no endpoint returns them, and no key is ever written to a provider handle or job payload.
@@ -84,7 +159,8 @@ Partial JSON is merged over the generated input. Reference images are sent as da
 - Voices: existing `TTS_PROVIDER=mespeak|openai|elevenlabs` pipeline. `mespeak` works offline; OpenAI/ElevenLabs need their keys. Voices are synthesised per dialogue line using each character's preset.
 - Music: procedural ambient audio is available in the legacy pipeline. For films, upload a licensed track per project (`POST /api/films/:id/upload`, `kind=music`). The renderer mixes it under dialogue at low volume.
 - Sound effects: upload real audio clips (`kind=sfx`, max 25 MB) into the project library, then attach cues per scene (`atSeconds`, `gain`) via the scene editor. Cues are decoded with FFmpeg and mixed at the exact timestamp; a missing asset is reported in preflight instead of being silently invented. `FILM_SFX_ENABLED=false` disables the feature.
-- Lip-sync: **only** where the chosen model natively supports it (Google Veo with audio-capable variants). The UI does not claim lip-sync for Replicate/Fal text/image-to-video models.
+- Lip-sync: a dedicated, provider-gated path. `POST /api/films/:id/scenes/:sceneId/lipsync` requires a real scene clip **and** a recorded voice take (otherwise 409 `clip_required` / `voice_take_required`), then queues a `film_lipsync` job. It needs `FILM_LIPSYNC_PROVIDER` plus `REPLICATE_API_TOKEN` or `FAL_API_KEY` and an explicit model id (`FILM_LIPSYNC_REPLICATE_MODEL` / `FILM_FAL_LIPSYNC_MODEL`) — we never guess a model name. Without them the API answers 503 `lip_sync_unavailable`, the UI disables the button and nothing is changed. The provider call (data-URI upload → poll → download → FFmpeg probe → clip replacement) is implemented but **unverified live** here because no key or egress exists.
+- Motion transfer: the same pattern via `POST /api/films/:id/scenes/:sceneId/motion` and the `film_motion` job. It animates the scene's storyboard still (409 `still_required` without one) and needs `FILM_MOTION_PROVIDER` + a credential + `FILM_MOTION_REPLICATE_MODEL` / `FILM_MOTION_FAL_MODEL`; otherwise 503 `motion_transfer_unavailable`. Local VFX looks (vignette, grain, soft focus, punch-in, slow zoom, handheld, letterbox) are plain FFmpeg and always work.
 - Character consistency: every scene prompt repeats the cast's identical appearance/wardrobe description, the film's story-bible world and continuity notes, and the location/time of day. Scenes store their `cast`; image-to-video providers receive the strongest available reference image (project reference, character sheet, then a cast member's reference). This is production-grade prompting, not a guaranteed identity lock — no provider offers that for arbitrary characters.
 
 ---
@@ -200,7 +276,10 @@ All routes require an authenticated session and are mounted at `/api/films`.
 | GET/PATCH/DELETE | `/:id` | Full detail / edit / delete a project. |
 | POST/PUT | `/:id/screenplay` | Generate / save an edited screenplay (rebuilds scene rows). |
 | GET/POST | `/:id/scenes` | List / add a scene. |
-| PATCH/DELETE | `/:id/scenes/:sceneId` | Edit / delete a scene. |
+| PATCH/DELETE | `/:id/scenes/:sceneId` | Edit / delete a scene, including shot size, camera angle, lens, lighting, colour grade, composition and location link. |
+| GET/POST | `/:id/locations` | List / create reusable filming locations for this project. |
+| PATCH/DELETE | `/:id/locations/:locationId` | Edit / delete a location (deleting detaches its scenes). |
+| GET | `/:id/qc` | Continuity and completeness audit: clips, cast references, shot direction, locations, runtime, TTS readiness, render. |
 | POST | `/:id/scenes/reorder` | Reorder storyboard. |
 | POST | `/:id/scenes/generate-all` | Queue all draft/failed scenes (bounded by concurrency). |
 | POST | `/:id/generation/start` | Start/resume a production run (`sceneIds` optional). |
@@ -213,6 +292,22 @@ All routes require an authenticated session and are mounted at `/api/films`.
 | POST | `/:id/scenes/:sceneId/generate` | Generate or regenerate **one** scene. |
 | GET | `/:id/scenes/:sceneId/clip` | Stream the real provider MP4 (range requests). |
 | GET | `/:id/scenes/:sceneId/poster` | Stream the poster frame. |
+| GET/POST | `/:id/storyboard` | Storyboard coverage / render missing or forced stills. |
+| GET | `/:id/storyboard/:frameId/image` | Stream a storyboard frame. |
+| POST | `/:id/poster` | Render key art from the logline and palette. |
+| GET | `/:id/poster/image` | Stream the rendered poster. |
+| POST | `/:id/characters/:characterId/concept` | Character concept art (sets the reference only for real AI art). |
+| GET/POST | `/:id/voice` | Voice-take overview / record missing or forced takes. |
+| GET | `/:id/scenes/:sceneId/voice` | Stream a scene's WAV take. |
+| GET/POST | `/flows`, `/flows/:flowId` | List/create and read/update/delete canvas flows. |
+| POST | `/flows/:flowId/run` | Execute a flow in dependency order. |
+| GET | `/flows/:flowId/artifact/:filename` | Stream a node's generated file. |
+| GET | `/models` | Live model readiness, limits and credit prices. |
+| POST | `/production/start` | Start a production from a brief (creates the project). |
+| GET | `/production` | List the caller's production runs and stage definitions. |
+| GET | `/:id/production` | Live stage board with scene counts, QC, credits and failures. |
+| POST | `/:id/production/advance` | `generate`, `assemble`, `retry` or `sync`. |
+| POST | `/:id/production/cancel` | Stop the run and cancel in-flight scene jobs. |
 | GET | `/:id/preflight` | Assembly readiness + missing scenes + render cost. |
 | POST | `/:id/assemble` | Queue final FFmpeg render (`subtitles`, `burnSubtitles`). |
 | POST | `/:id/assembly/cancel` | Cancel a running render and refund it. |
@@ -235,15 +330,51 @@ All routes require an authenticated session and are mounted at `/api/films`.
 
 Routes (all under the existing authenticated `/app` shell, same brand, themes and navigation):
 
-`/app/films` hub · `/short` · `/long` · `/series` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|scenes|render|preview`.
+`/app/films` hub · `/short` · `/long` · `/series` · `/agent` · `/canvas` · `/ads` · `/models` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|locations|storyboard|scenes|voice|timeline|render|preview`.
 
-The project workspace is a six-step resumable wizard. Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
+**Ad Studio** (`/app/films/ads`) manages reusable brand kits — including a logo upload that is burned into the finished advertisement — attaches one to an advertisement project, then writes and applies creative angles. **Timeline** rows carry a collapsible track editor (speed 0.25×–4×, one of eight FFmpeg looks, timed text overlay, picture-in-picture image overlay, split point) whose values are burned in by FFmpeg at render time. The **production agent** can rewrite the screenplay from a natural-language note and schedule the paid generation stage for an unattended run. Admin accounts get a **Film studio** tab in `/app/admin` with provider switches, queue counts, failed-job requeue and a production snapshot.
+
+The project workspace is a ten-step resumable wizard (setup, screenplay, cast, locations, storyboard, direct & generate, voice, timeline, assemble, preview). Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
 
 ### Web, Android, iOS
 
 - The app is a responsive **installable PWA** (`/manifest.webmanifest`, `/sw.js`, 192/512/maskable icons, standalone display, iOS meta tags). On Android it can be installed from Chrome; on iOS it can be added to the Home Screen from Safari. It works on phones and tablets with the same account and data.
 - The service worker caches only the app shell and static assets. **API responses, media and authenticated state are never cached**, so credits, jobs and videos always reflect the server.
 - **Native App Store / Play Store binaries are not implemented.** Store-ready native wrappers (Capacitor/React Native), push notifications, in-app purchases, signing and store review are a separate phase. Do not claim native apps exist.
+
+---
+
+### Delivery assets: overlays, stems, logos and scheduling
+
+- **Picture-in-picture overlays**: upload an image per project
+  (`POST /api/films/:id/upload` with `kind=overlay`, PNG/JPEG/WebP) and pick it on
+  any scene in the timeline. The scene stores the asset **id**; FFmpeg draws it
+  with the chosen corner, scale (10–60% of frame width), opacity and time window.
+  `GET /api/films/:id/overlays` lists assets, `DELETE` removes one and clears the
+  scenes that referenced it.
+- **Brand logos**: `POST /api/films/brand-kits/:id/logo`, streamed back with
+  `GET /api/films/brand-kits/:id/logo`. Any project with that kit attached gets
+  the logo burned into the bottom-right of the final MP4; the render result
+  reports `brandLogo: true`.
+- **Audio stems**: every completed render publishes `stems/voice.wav`,
+  `stems/sfx.wav` and `stems/music.<ext>` next to `final.mp4`.
+  `GET /api/films/:id/stems` lists them with byte sizes and
+  `GET /api/films/:id/stems/:kind` downloads one.
+- **Revision**: `POST /api/films/:id/production/revise` with
+  `{ stage: "screenplay", instruction }` rewrites the screenplay and rebuilds the
+  cast, locations and direction. It refuses (409 `production_locked`) once clips
+  exist, so paid work is never orphaned.
+- **Product shots**: `POST /api/films/brand-kits/:id/product-shot` generates a
+  square product image from the kit copy with the configured image provider
+  (`GET /api/films/brand-kits/:id/product-image`). With only the local renderer
+  the response says `aiGenerated: false`.
+- **Provider health**: `GET /api/admin/film/health` (admin) contacts only
+  providers with credentials, with a 4s timeout, and reports reachability and
+  latency — or `checked: false` and why. The admin Film studio tab has the button.
+- **Scheduled runs**: `POST /api/films/:id/production/schedule` with
+  `{ action: "schedule", runAt }` queues a `film_production_run` job at least a
+  minute and at most 90 days ahead. The worker executes the same approval-gated
+  generation; `WORKER_ENABLED=true` is required for it to run.
 
 ---
 
@@ -268,16 +399,78 @@ This application is plumbing; **you are responsible for the rights to what you g
 | Real AI scene video | `FILM_VIDEO_PROVIDER` + paid provider credential. |
 | Genuine AI screenwriting | `AI_PROVIDER=openai\|anthropic\|gemini` + key. Otherwise labelled template. |
 | Premium character voices | `TTS_PROVIDER=openai\|elevenlabs` + key. |
-| Lip-sync / native audio | A provider/model that explicitly supports it (e.g. Veo variants). |
+| Lip-sync | `FILM_LIPSYNC_PROVIDER` + `REPLICATE_API_TOKEN`/`FAL_API_KEY` + an explicit `FILM_LIPSYNC_REPLICATE_MODEL` or `FILM_FAL_LIPSYNC_MODEL`; 503 until configured. |
 | Background music | Your own licensed upload, or a separately licensed music API. |
 | Publishing to social networks | Existing official OAuth apps, connected accounts, public HTTPS origin, provider app review. Publishing a film only marks it published locally; it does not silently post to networks. |
+| Motion transfer (animate a still) | `FILM_MOTION_PROVIDER` + credential + explicit `FILM_MOTION_REPLICATE_MODEL`/`FILM_MOTION_FAL_MODEL`; 503 until configured. |
+| Ad-account delivery | The existing publishing integrations. |
+| Keyframed animation, frame-accurate scrubbing | Not implemented — not offered as controls. |
 | Purchasable credit packs | Stripe Price IDs + webhook → `credit_grant` ledger integration. |
 | Native Android/iOS store apps | Separate native-wrapper project and store review. |
 | Multi-node storage | Shared object storage / PostgreSQL for `STORAGE_DIR` clips; current default is local disk + SQLite. |
 
 ---
 
-## 9. Verifying locally
+## 9. Deploying the film studio
+
+**Build and start.** The API and the built SPA are served by one Node process:
+
+```bash
+npm ci
+npm run build
+NODE_ENV=production WORKER_ENABLED=true npm start
+```
+
+`WORKER_ENABLED=true` is required in production: scene jobs, assembly jobs and
+retries are executed by the background worker, and the queue is in the database,
+so a restart resumes unfinished work. With the worker disabled the UI still
+works, but nothing will ever render.
+
+**Configuration.** Nothing here is required to open the studio — missing pieces
+degrade honestly (a labelled offline screenplay, procedural stills, local voice
+takes, no clips). Add credentials only for the features you want:
+
+| Variable | Enables | Notes |
+|---|---|---|
+| `APP_URL`, `PUBLIC_BASE_URL` | Auth + CORS + signed media URLs | Must equal the external HTTPS origin, or browser calls are rejected. |
+| `APP_ENCRYPTION_KEY` | Encrypted provider keys at rest | Generate with `npm run setup -- --generate-key`. |
+| `FILM_VIDEO_PROVIDER` + `REPLICATE_API_TOKEN` / `FAL_API_KEY` / `GOOGLE_VEO_API_KEY` | Real scene clips | Without one, generation returns `503` and never fabricates footage. |
+| `AI_PROVIDER` + `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Genuine screenplays | Otherwise the writer is `local-template` and says so. |
+| `IMAGE_PROVIDER=procedural\|openai\|replicate` | Storyboards, posters, concept art | `procedural` needs no key and is labelled non-AI. |
+| `TTS_PROVIDER=mespeak\|openai\|elevenlabs` | Voice takes and the final mix | `mespeak` is offline. |
+| `FILM_LIPSYNC_PROVIDER` + model id + provider key | Lip-sync of a clip to its voice take | 503 `lip_sync_unavailable` until all three exist. |
+| `FILM_MOTION_PROVIDER` + model id + provider key | Motion transfer from a storyboard still | 503 `motion_transfer_unavailable` until all three exist. |
+| `FFMPEG_PATH` | Rendering | Bundled by default via `@ffmpeg-installer/ffmpeg`; set an absolute path when the bundled binary cannot run. |
+| `FILM_MAX_SCENES`, `FILM_MAX_SCENE_SECONDS`, `FILM_MAX_PROJECT_SECONDS` | Runtime limits | Advertised to the UI as `maxProducibleSeconds`. |
+| `FILM_ASSEMBLY_SEGMENT_SCENES` | Peak temp disk during render | Lower it on small disks. |
+| `FILM_TRANSITION_FADE_SECONDS` | Fade length for timeline transitions | Default `0.5`, clamped to 0.1–2. |
+| `DATA_DIR`, `STORAGE_DIR`, `SQLITE_PATH` | Persistence | Clips, stills and WAVs are written to `STORAGE_DIR`. |
+| `DATABASE_URL` | PostgreSQL instead of SQLite | Optional; the film tables are created by the same additive migration. |
+
+**Database.** Migrations run automatically on boot and are additive and
+idempotent (the suite upgrades a pre-upgrade database in place). Deploy the new
+version, then confirm the log lines `Created database table` /
+`Added film column` appear exactly once.
+
+**Disk.** Stills are ~0.3–2 MB each, voice takes a few hundred KB, scene clips
+tens of MB and the render needs temporary space proportional to the film. Local
+disk is the default; for multi-node deployments move `STORAGE_DIR` to shared
+object storage and set `DATABASE_URL`.
+
+**Smoke test after deploy.**
+
+```bash
+curl -s "$PUBLIC_BASE_URL/api/meta/health"
+curl -s -H "cookie: <session>" "$PUBLIC_BASE_URL/api/films/models"   # readiness
+curl -s -H "cookie: <session>" "$PUBLIC_BASE_URL/api/films/production"
+```
+
+`/api/films/models` is the fastest truth check: it reports every provider as
+`ready` or `needs credentials`, and the studio UI mirrors it.
+
+---
+
+## 10. Verifying locally
 
 ```bash
 npm ci
@@ -285,6 +478,12 @@ npm test                 # includes filmmaking, film-providers, film-longform an
 npm run build
 npm run setup -- --check # overall configuration status
 ```
+
+`tests/film-gated-providers.test.js` (3 tests) runs lip-sync and motion transfer against a local wire-protocol double: it asserts the data-URI payloads and model ids, the poll/download/probe/replace cycle, and that an admin-disabled provider blocks both.
+
+`tests/film-delivery.test.js` (7 tests) covers overlay upload and rejection, a pixel-verified picture-in-picture render, exported WAV stems, logo compositing into a 9:16 advertisement, screenplay revision from a note, and scheduled runs (including re-scheduling moving one job).
+
+`tests/film-postproduction.test.js` (10 tests) covers props continuity, multi-track edits, all eight VFX presets rendered with FFmpeg, a **real two-scene MP4** with the edit burned in, the honest 503/409 gates for lip-sync and motion transfer, brand-kit ad variations, cast-library cloning, scene splitting, queue-backed storyboard/voice and the admin film controls.
 
 `tests/film-longform.test.js` (10 tests) and `tests/film-migration.test.js` (2 tests) cover, in order: a 60-minute request planned as exactly 360 clips, both over-limit error codes with exact numbers, a screenplay inheriting the project runtime, the estimate payload and config advertisement (including `maxProducibleSeconds`), provider duration mapping, rejection of an empty/corrupt provider file, a bounded-concurrency run through start → pause → resume → cancel with exact refunds and provider cancellation, a segmented render with real SFX + music + a soft subtitle track, and an in-place upgrade of a pre-long-form database that keeps every existing project and scene.
 

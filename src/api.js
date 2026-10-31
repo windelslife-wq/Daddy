@@ -59,7 +59,7 @@ export function safeHref(url) {
   } catch { return null; }
 }
 export function initials(name = '') {
-  return String(name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'FS';
+  return String(name).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'FCL';
 }
 export function errorMessage(error) {
   return error?.message || String(error || 'Something went wrong.');

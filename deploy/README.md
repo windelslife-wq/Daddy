@@ -21,7 +21,7 @@ Internet ──HTTPS──▶ Caddy (80/443, Let's Encrypt)
 ## 1. Prerequisites
 
 - A host with Docker Engine + Compose v2, ports **80** and **443** open.
-- A DNS **A/AAAA** record pointing `studio.example.com` at that host.
+- A DNS **A/AAAA** record pointing `filmclublens.com` at that host.
 - A `.env` on the host (gitignored — never commit it).
 
 ```bash
@@ -33,7 +33,7 @@ Set these in `.env`:
 
 | Variable | Value |
 |---|---|
-| `DOMAIN` | `studio.example.com` (hostname only, no scheme) |
+| `DOMAIN` | `filmclublens.com` (hostname only, no scheme) |
 | `POSTGRES_PASSWORD` | long random password |
 | `APP_ENCRYPTION_KEY` | `npm run setup -- --generate-key` (writes it for you) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | real admin credentials |
@@ -110,10 +110,10 @@ Run this **from outside the host** (your laptop or CI), not on the server —
 that is the point of the check:
 
 ```bash
-npm run deploy:check -- --origin https://studio.example.com
-npm run deploy:check -- --origin https://studio.example.com \
+npm run deploy:check -- --origin https://filmclublens.com
+npm run deploy:check -- --origin https://filmclublens.com \
   --email admin@example.com --password '…' \
-  --media-url 'https://studio.example.com/api/…signed…'
+  --media-url 'https://filmclublens.com/api/…signed…'
 ```
 
 It performs a real DNS lookup, a real TLS handshake (reporting CN, issuer and
@@ -137,11 +137,11 @@ npm run doctor -- --probe
 and must match **exactly** (no trailing slash):
 
 ```
-https://studio.example.com/api/oauth/facebook/callback   Meta (FB + IG)
-https://studio.example.com/api/oauth/google/callback     Google / YouTube
-https://studio.example.com/api/oauth/x/callback          X
-https://studio.example.com/api/oauth/sandbox/callback    local sandbox only
-https://studio.example.com/api/billing/webhook           Stripe
+https://filmclublens.com/api/oauth/facebook/callback   Meta (FB + IG)
+https://filmclublens.com/api/oauth/google/callback     Google / YouTube
+https://filmclublens.com/api/oauth/x/callback          X
+https://filmclublens.com/api/oauth/sandbox/callback    local sandbox only
+https://filmclublens.com/api/billing/webhook           Stripe
 ```
 
 ## 6. Finish the modules one by one
@@ -173,7 +173,7 @@ criteria. `--attest` is an explicit human declaration and is audit-logged.
 ## 8. Backups
 
 ```bash
-docker compose exec postgres pg_dump -U faceless -d faceless_studio > backup.sql
+docker compose exec postgres pg_dump -U filmclublens -d filmclublens > backup.sql
 ```
 
 Store the dump and `APP_ENCRYPTION_KEY` in separate secret stores. SQLite data

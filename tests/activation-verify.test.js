@@ -32,7 +32,7 @@ function env(overrides = {}) {
     X_CONSUMER_SECRET: 'xconsumersecret12345',
     STRIPE_SECRET_KEY: 'sk_test_abcdef123456',
     STRIPE_WEBHOOK_SECRET: 'whsec_abcdef123456',
-    PUBLIC_BASE_URL: 'https://studio.example.com',
+    PUBLIC_BASE_URL: 'https://filmclublens.com',
     APP_ENCRYPTION_KEY: crypto.randomBytes(32).toString('base64'),
     ...overrides,
   };
@@ -144,10 +144,10 @@ test('signed webhook ping carries a correct HMAC signature', async () => {
     fetchImpl,
   });
   assert.equal(result.status, 'verified');
-  const timestamp = captured.init.headers['x-faceless-timestamp'];
+  const timestamp = captured.init.headers['x-film-club-lens-timestamp'];
   const expected = `sha256=${crypto.createHmac('sha256', secret).update(`${timestamp}.${captured.init.body}`).digest('hex')}`;
-  assert.equal(captured.init.headers['x-faceless-signature'], expected);
-  assert.equal(captured.init.headers['x-faceless-event'], 'activation.ping');
+  assert.equal(captured.init.headers['x-film-club-lens-signature'], expected);
+  assert.equal(captured.init.headers['x-film-club-lens-event'], 'activation.ping');
 });
 
 test('offline-default modules verify without any network access', async () => {
@@ -208,6 +208,48 @@ test('SMTP and Postgres use injected implementations when available', async () =
   const pg = await verifyModule('postgres', { env: env({ DATABASE_URL: 'postgresql://u:p@db.example.com:5432/faceless' }), fetchImpl: fakeFetch(), pgCheckImpl: async () => ({ ok: false, message: 'connection refused' }) });
   assert.equal(pg.status, 'invalid');
   assert.match(pg.checks[0].detail, /connection refused/);
+});
+
+test('Postgres verification proves TLS, version and schema readiness', async () => {
+  const remote = 'postgresql://u:p@db.example.com:5432/faceless';
+  const base = { ok: true, version: '16.4', tables: 27, missingCore: [] };
+
+  const secure = await verifyModule('postgres', {
+    env: env({ DATABASE_URL: remote }), fetchImpl: fakeFetch(),
+    pgCheckImpl: async () => ({ ...base, tls: true }),
+  });
+  assert.equal(secure.status, 'verified');
+  assert.match(secure.checks[0].detail, /PostgreSQL 16\.4/);
+  assert.equal(secure.checks.find((c) => c.name === 'TLS in use').status, 'pass');
+  assert.equal(secure.checks.find((c) => c.name === 'schema readiness').status, 'pass');
+
+  // A remote database reached without TLS must fail: credentials and queries
+  // would cross the network in plaintext.
+  const plaintext = await verifyModule('postgres', {
+    env: env({ DATABASE_URL: remote }), fetchImpl: fakeFetch(),
+    pgCheckImpl: async () => ({ ...base, tls: false }),
+  });
+  assert.equal(plaintext.status, 'invalid');
+  const tls = plaintext.checks.find((c) => c.name === 'TLS in use');
+  assert.equal(tls.status, 'fail');
+  assert.match(tls.detail, /sslmode=require/);
+
+  // Localhost is allowed to run without TLS for development.
+  const local = await verifyModule('postgres', {
+    env: env({ DATABASE_URL: 'postgresql://u:p@127.0.0.1:5432/faceless' }), fetchImpl: fakeFetch(),
+    pgCheckImpl: async () => ({ ...base, tls: false }),
+  });
+  assert.equal(local.status, 'verified');
+  assert.equal(local.checks.find((c) => c.name === 'TLS in use').status, 'pass');
+
+  // An empty database is not a failure — the app creates the schema on start.
+  const empty = await verifyModule('postgres', {
+    env: env({ DATABASE_URL: remote }), fetchImpl: fakeFetch(),
+    pgCheckImpl: async () => ({ ok: true, version: '16.4', tls: true, tables: 0, missingCore: ['users', 'jobs'] }),
+  });
+  assert.equal(empty.status, 'verified');
+  assert.equal(empty.checks.find((c) => c.name === 'schema readiness').status, 'skip');
+  assert.match(empty.action, /db:bootstrap/);
 });
 
 test('app review stays manual and cannot be faked as verified', async () => {

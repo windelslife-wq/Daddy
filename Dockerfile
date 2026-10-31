@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Production image for Faceless Studio (API + built React/PWA frontend).
+# Production image for Film Club Lens (API + built React/PWA frontend).
 # The same image runs the API, dedicated workers, and one-shot DB bootstrap.
 FROM node:22-bookworm
 

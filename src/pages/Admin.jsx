@@ -1,20 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Activity, AlertCircle, BarChart3, CheckCircle2, Cpu, KeyRound, ListChecks, Mail,
-  RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
+  Activity, AlertCircle, BarChart3, CheckCircle2, Clapperboard, Cpu, KeyRound, ListChecks, Mail,
+  PlugZap, RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
 } from 'lucide-react';
 import { useLoad } from '../hooks.js';
 import { get, patch, post, put, formatDate, formatNumber } from '../api.js';
 import { Button, Card, EmptyState, ErrorBanner, Field, InfoBanner, KeyValue, Modal, PageHeader, Spinner, StatusBadge, Toggle, useToast } from '../components/ui.jsx';
+import ProviderSettings from './admin/ProviderSettings.jsx';
 
 const tabs = [
   { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'providers', label: 'Providers', icon: PlugZap },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'plans', label: 'Plans & limits', icon: Wallet },
   { id: 'settings', label: 'Global settings', icon: SettingsIcon },
   { id: 'jobs', label: 'Jobs', icon: ListChecks },
   { id: 'integrations', label: 'Integrations', icon: Cpu },
   { id: 'activation', label: 'Activation', icon: Rocket },
+  { id: 'film', label: 'Film studio', icon: Clapperboard },
   { id: 'logs', label: 'Audit logs', icon: ShieldCheck },
   { id: 'messages', label: 'Messages', icon: Mail },
 ];
@@ -48,8 +51,11 @@ export default function Admin() {
       overview: '/api/admin/overview', users: '/api/admin/users', plans: '/api/admin/plans',
       settings: '/api/admin/settings', jobs: '/api/admin/jobs', integrations: '/api/admin/integrations',
       activation: '/api/admin/activation',
+      film: '/api/admin/film/ops',
       logs: '/api/admin/audit-logs', messages: '/api/admin/contact-messages',
     };
+    // The Providers tab owns its own load: it edits a single configuration object.
+    if (!endpoints[tab]) return Promise.resolve(null);
     return get(endpoints[tab]);
   };
   const { data, loading, error, reload } = useLoad(loader, [tab], { refreshMs: tab === 'overview' || tab === 'jobs' ? 15000 : 0 });
@@ -136,6 +142,22 @@ export default function Admin() {
     };
     await action(() => patch('/api/admin/settings', payload), 'Global settings saved.');
   }
+  async function setFilmProvider(providerId, enabled) {
+    const result = await action(() => post(`/api/admin/film/providers/${encodeURIComponent(providerId)}`, { enabled }), enabled ? 'Provider enabled.' : 'Provider disabled.');
+    if (!result) return;
+  }
+  const [health, setHealth] = useState(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  async function checkFilmHealth() {
+    setHealthBusy(true);
+    try { setHealth(await get('/api/admin/film/health')); }
+    catch (err) { showToast(err.message, 'error'); }
+    finally { setHealthBusy(false); }
+  }
+  async function retryFilmJobs() {
+    const result = await action(() => post('/api/admin/film/jobs/retry-failed', {}), 'Failed film jobs requeued.');
+    if (result) showToast(`${result.requeued} job(s) back in the queue.`, 'info');
+  }
   async function retryJob(id) { await action(() => post(`/api/admin/jobs/${id}/retry`, {}), 'Job retried.'); }
   async function cancelJob(id) { await action(() => post(`/api/admin/jobs/${id}/cancel`, {}), 'Job cancelled.'); }
   async function cleanup() { await action(() => post('/api/admin/cleanup', {}), 'Cleanup job queued.'); }
@@ -147,7 +169,7 @@ export default function Admin() {
 
   return (
     <>
-      <PageHeader eyebrow="Administration" title="Admin control center" description="Manage users, plans, integrations, global settings, and background jobs." actions={<><Button variant="ghost" onClick={cleanup} disabled={busy}><Trash2 size={15} /> Cleanup</Button><Button variant="secondary" onClick={() => setBroadcastOpen(true)}><Send size={15} /> Broadcast</Button></>} />
+      <PageHeader eyebrow="Administration" title="Admin control center" description="Manage users, plans, provider credentials, integrations, global settings, and background jobs." actions={<><Button variant="ghost" onClick={cleanup} disabled={busy}><Trash2 size={15} /> Cleanup</Button><Button variant="secondary" onClick={() => setBroadcastOpen(true)}><Send size={15} /> Broadcast</Button></>} />
       <ErrorBanner error={error} onRetry={() => reload().catch(() => {})} />
       <div className="admin-grid">
         <div className="admin-side card" style={{ padding: 10 }}>
@@ -156,6 +178,7 @@ export default function Admin() {
         <div className="stack">
           {loading && !data ? <Card><Spinner label="Loading admin data…" /></Card> : (
             <>
+              {tab === 'providers' && <ProviderSettings />}
               {tab === 'overview' && data?.counts && (
                 <>
                   <div className="stat-grid">
@@ -220,7 +243,7 @@ export default function Admin() {
                   <div><h3>Official integration readiness</h3><div className="list">{Object.entries(data.providerStatus.integrations).map(([key, integration]) => <div className="integration-row" key={key}><strong>{integration.label}</strong><StatusBadge status={integration.configured ? 'connected' : 'needs_review'} label={integration.configured ? 'Configured' : 'Needs keys'} /></div>)}</div></div>
                   <div><h3>Required environment variables</h3><ul className="env-list">{Object.entries(data.requiredEnvironment || {}).map(([key, values]) => <li key={key}><strong>{key}</strong><br />{values.map((value) => <code key={value}>{value}</code>)}</li>)}</ul></div>
                 </div>
-                <InfoBanner icon={KeyRound}><strong>Secrets are environment-only.</strong><span> The admin panel can report status and toggle platform settings, but never reads or writes secret API keys.</span></InfoBanner>
+                <InfoBanner icon={KeyRound}><strong>Where credentials live.</strong><span> Provider keys are managed in the <strong>Providers</strong> tab: encrypted with <code>APP_ENCRYPTION_KEY</code>, write-only once saved, and falling back to these environment variables when not set there. Publishing scopes and app review stay environment-only because they are provider-console approvals, not application settings.</span></InfoBanner>
               </Card>}
               {tab === 'integrations' && data?.readiness && <>
                 <Card title="Deployment readiness" icon={ShieldCheck} subtitle={`Overall: ${data.readiness.overall}. ${data.readiness.note}`}>
@@ -304,6 +327,68 @@ export default function Admin() {
                   ))}</div>
                 )}
               </Card>}
+              {tab === 'film' && data?.providers && (
+                <>
+                  <Card title="Video providers" icon={Clapperboard} subtitle="Disabling a provider removes it from routing immediately — requests fail honestly with 503 instead of silently falling back." action={<><Button size="sm" variant="ghost" disabled={healthBusy} onClick={checkFilmHealth}>{healthBusy ? <Spinner size={13} /> : <><Activity size={14} /> Check health</>}</Button><Button size="sm" variant="ghost" onClick={() => reload()}><RefreshCw size={14} /> Refresh</Button></>}>
+                    <div className="list">
+                      {data.providers.video.map((provider) => (
+                        <div className="list-item" key={provider.id}>
+                          <div className="list-main">
+                            <strong>{provider.label || provider.id}</strong>
+                            <small>{provider.configured ? 'Credential present' : 'No credential'} · {provider.disabled ? 'disabled in admin' : 'available'}</small>
+                          </div>
+                          <Toggle checked={!provider.disabled} disabled={busy} onChange={(next) => setFilmProvider(provider.id, next)} label={`Enable ${provider.id}`} />
+                        </div>
+                      ))}
+                    </div>
+                    {!data.providers.video.length && <EmptyState icon={Clapperboard} title="No video providers registered" description="The provider registry is empty — check server/film/videoProviders.js." />}
+                    {health && (
+                      <div className="list" style={{ marginTop: 10 }}>
+                        {health.providers.map((item) => (
+                          <div className="list-item" key={item.id}>
+                            <div className="list-main">
+                              <strong>{item.id}</strong>
+                              <small>{item.checked ? `${item.reachable ? 'reachable' : 'unreachable'}${item.status ? ` · HTTP ${item.status}` : ''} · ${item.latencyMs} ms` : item.reason}</small>
+                            </div>
+                            <span className={`status-dot ${item.checked ? (item.reachable ? 'good' : 'warn') : ''}`} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                  <Card title="Render queue" icon={ListChecks} subtitle="Film jobs by type and status.">
+                    {Object.keys(data.queue || {}).length === 0
+                      ? <EmptyState icon={ListChecks} title="Queue is empty" description="No film jobs have run yet." />
+                      : (
+                        <div className="table-wrap"><table><thead><tr><th>Job type</th><th>Statuses</th></tr></thead><tbody>
+                          {Object.entries(data.queue).map(([type, statuses]) => (
+                            <tr key={type}><td>{type}</td><td>{Object.entries(statuses).map(([status, count]) => `${status}: ${count}`).join(' · ')}</td></tr>
+                          ))}
+                        </tbody></table></div>
+                      )}
+                  </Card>
+                  <Card title="Failed film jobs" icon={AlertCircle} subtitle={`${data.renderedFilms} rendered final cut(s)`} action={<Button size="sm" variant="secondary" disabled={busy} onClick={retryFilmJobs}><RefreshCw size={14} /> Requeue failed</Button>}>
+                    {(data.failed || []).length === 0
+                      ? <EmptyState icon={CheckCircle2} title="Nothing failed" description="Every film job either finished or is still queued." />
+                      : (
+                        <div className="list">
+                          {data.failed.map((job) => (
+                            <div className="list-item" key={job.id}>
+                              <div className="list-main"><strong>{job.type}</strong><small>{job.attempts}/{job.maxAttempts} attempts · {job.lastError}</small></div>
+                              <small>{formatDate(job.updated_at)}</small>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                  </Card>
+                  <Card title="Production snapshot" icon={BarChart3}>
+                    <div className="grid grid-2">
+                      <KeyValue label="Productions" value={Object.entries(data.productions || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none'} />
+                      <KeyValue label="Scenes" value={Object.entries(data.scenes || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none'} />
+                    </div>
+                  </Card>
+                </>
+              )}
             </>
           )}
         </div>

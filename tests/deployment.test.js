@@ -315,9 +315,9 @@ test('activate requires a meaningful attestation and only records it after real 
     req.on('data', (d) => chunks.push(d));
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
-      const timestamp = req.headers['x-faceless-timestamp'];
+      const timestamp = req.headers['x-film-club-lens-timestamp'];
       const expected = `sha256=${crypto.createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')}`;
-      const ok = req.headers['x-faceless-signature'] === expected;
+      const ok = req.headers['x-film-club-lens-signature'] === expected;
       res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
       res.end(ok ? '{"ok":true}' : '{"ok":false}');
     });

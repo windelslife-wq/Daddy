@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react
 import { useAuth } from '../context/AuthContext.jsx';
 import { SITE } from '../config/site.js';
 import { Icon } from '../components/Icon.jsx';
+import { BrandMark } from '../components/BrandMark.jsx';
 import { Footer } from '../components/Footer.jsx';
 import { ThemeSwitcher } from '../components/ThemeSwitcher.jsx';
 import { ErrorBanner, Spinner } from '../components/ui.jsx';
@@ -105,7 +106,7 @@ export default function AuthPage({ mode = 'login' }) {
       <a className="skip-link" href="#auth-main">Skip to form</a>
       <header className="auth-header">
         <div className="container auth-header-inner">
-          <Link to="/" className="brand"><span className="brand-mark"><Icon name="sparkles" size={18} /></span><span className="brand-copy"><strong>{SITE.name}</strong><small>Creator operations</small></span></Link>
+          <Link to="/" className="brand"><span className="brand-mark"><BrandMark size={38} /></span><span className="brand-copy"><strong>{SITE.name}</strong><small>Creator operations</small></span></Link>
           <div className="auth-header-actions">
             <Link to="/" className="auth-back-link"><Icon name="arrow-left" size={15} /> Back to website</Link>
             <ThemeSwitcher compact />
@@ -184,7 +185,7 @@ export default function AuthPage({ mode = 'login' }) {
               </button>
             </form>
             <div className="auth-switch">
-              {isSignup ? <>Already have an account? <Link to={authLink('/login')}>Sign in</Link></> : <>New to Faceless Studio? <Link to={authLink('/signup')}>Create an account</Link></>}
+              {isSignup ? <>Already have an account? <Link to={authLink('/login')}>Sign in</Link></> : <>New to Film Club Lens? <Link to={authLink('/signup')}>Create an account</Link></>}
             </div>
             {demo?.email && demo?.password && (
               <>

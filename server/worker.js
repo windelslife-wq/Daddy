@@ -9,6 +9,11 @@ import { tickScheduler } from './services/scheduler.js';
 import { createAutopilotProject } from './services/projects.js';
 import { generateAutopilotTopic } from './ai.js';
 import { processFilmSceneJob, processFilmAssemblyJob, dispatchPlannedScenes, sweepFilmGenerations, handleSceneJobFailure } from './film/scenes.js';
+import { processStoryboardBatchJob } from './film/storyboard.js';
+import { processVoiceBatchJob } from './film/voice.js';
+import { processLipSyncJob } from './film/lipsync.js';
+import { processMotionJob } from './film/vfx.js';
+import { processScheduledProduction } from './film/production.js';
 
 const workerId = `${os.hostname()}:${process.pid}:${crypto.randomUUID().slice(0, 8)}`;
 let interval = null;
@@ -160,6 +165,16 @@ async function processJob(job) {
       return processFilmAssemblyJob(payload);
     case 'film_dispatch_scenes':
       return dispatchPlannedScenes(payload.filmId);
+    case 'film_storyboard_batch':
+      return processStoryboardBatchJob(payload);
+    case 'film_voice_batch':
+      return processVoiceBatchJob(payload);
+    case 'film_lipsync':
+      return processLipSyncJob(payload);
+    case 'film_motion':
+      return processMotionJob(payload);
+    case 'film_production_run':
+      return processScheduledProduction(payload);
     case 'autopilot_generate': {
       const niche = await db('niches').where({ id: payload.nicheId }).first();
       const topic = niche ? await generateAutopilotTopic({ ...niche, config: parseJson(niche.config, {}) }) : null;

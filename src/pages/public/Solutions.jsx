@@ -42,7 +42,7 @@ export default function Solutions() {
       <PageHero
         eyebrow="Solutions"
         title="One content engine for many kinds of teams"
-        description="Faceless Studio adapts to creators, agencies, educators, publishers, businesses, and engineering teams through configurable niches, review rules, provider settings, and publishing targets."
+        description="Film Club Lens adapts to creators, agencies, educators, publishers, businesses, and engineering teams through configurable niches, review rules, provider settings, and publishing targets."
         actions={<><Link to="/signup" className="btn btn-primary btn-lg">Build your workflow <Icon name="arrow-right" size={16} /></Link><Link to="/contact" className="btn btn-secondary btn-lg">Discuss a use case</Link></>}
       />
       <Section eyebrow="Use cases" title="Workflows mapped to real goals" description="Each solution uses the same reliable pipeline, with settings that match the team’s operating model." align="center">

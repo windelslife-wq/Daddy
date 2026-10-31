@@ -7,15 +7,15 @@ completion audit. Regenerate with:
 npm run --silent setup -- --work all --record --progress
 ```
 
-Generated: 2026-10-28T07:09:31.593Z
+Generated: 2026-10-30T09:24:24.785Z
 
 | Metric | Value |
 |---|---|
 | Modules fully complete | 0 / 15 |
 | In progress | 6 |
 | Not started | 9 |
-| Criteria met | 10 / 70 |
-| Local preflight ready | 4 |
+| Criteria met | 16 / 70 |
+| Local preflight ready | 5 |
 
 > **Honesty rule.** A module is complete only when every criterion is backed
 > by real state: valid configuration, a recorded live verification, a
@@ -52,13 +52,13 @@ process, `npm run db:bootstrap` (real Postgres + two-worker claim proof) and
 
 | # | Module | Preflight | Verification | Audit | Status |
 |---|---|---|---|---|---|
-| 14 | [Production credential encryption key](#14-production-credential-encryption-key) | incomplete | unconfigured | 1/4 | ⬜ |
+| 14 | [Production credential encryption key](#14-production-credential-encryption-key) | ready | verified | 3/4 | ⬜ |
 | 12 | [Public HTTPS origin, callbacks & signed media](#12-public-https-origin-callbacks--signed-media) | incomplete | unconfigured | 0/5 | ⬜ |
 | 13 | [Production database (PostgreSQL)](#13-production-database-postgresql) | incomplete | unconfigured | 1/4 | ⬜ |
-| 8 | [External AI script providers](#8-external-ai-script-providers) | ready | verified | 2/4 | ⬜ |
-| 9 | [Research providers (Brave / Tavily)](#9-research-providers-brave--tavily) | ready | verified | 2/4 | ⬜ |
-| 10 | [External image providers (OpenAI Images / Replicate)](#10-external-image-providers-openai-images--replicate) | ready | verified | 2/4 | ⬜ |
-| 11 | [External TTS providers (OpenAI TTS / ElevenLabs)](#11-external-tts-providers-openai-tts--elevenlabs) | ready | verified | 2/4 | ⬜ |
+| 8 | [External AI script providers](#8-external-ai-script-providers) | ready | verified | 3/4 | ⬜ |
+| 9 | [Research providers (Brave / Tavily)](#9-research-providers-brave--tavily) | ready | verified | 3/4 | ⬜ |
+| 10 | [External image providers (OpenAI Images / Replicate)](#10-external-image-providers-openai-images--replicate) | ready | verified | 3/4 | ⬜ |
+| 11 | [External TTS providers (OpenAI TTS / ElevenLabs)](#11-external-tts-providers-openai-tts--elevenlabs) | ready | verified | 3/4 | ⬜ |
 | 6 | [SMTP email notifications](#6-smtp-email-notifications) | incomplete | unconfigured | 0/4 | ⬜ |
 | 7 | [Signed notification webhooks](#7-signed-notification-webhooks) | incomplete | unconfigured | 0/4 | ⬜ |
 | 1 | [Facebook Pages publishing](#1-facebook-pages-publishing) | incomplete | unconfigured | 0/6 | ⬜ |
@@ -77,35 +77,25 @@ AES-256-GCM encryption for stored OAuth credentials. Development auto-generates 
 
 | Check | Value |
 |---|---|
-| Offline preflight | incomplete (0/1) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.493Z |
-| Completion audit | 1/4 criteria |
+| Offline preflight | ready (1/1) |
+| Live verification | verified — 2026-10-30T09:24:24.637Z |
+| Completion audit | 3/4 criteria |
 
 ### Completion criteria
 
 | Criterion | Status | Owner | Next action |
 |---|---|---|---|
-| Local configuration | ⬜ pending | You — server environment | Run `npm run setup -- --module encryption-key` and fill the missing values. |
-| Live verification passed | ⬜ pending | This repository (automatable) | Click Verify (this module is checked offline). |
+| Local configuration | ✅ pass | You — server environment | Done |
+| Live verification passed | ✅ pass | This repository (automatable) | Done |
 | Provider / deployment steps confirmed | ⬜ pending | You — provider console | Finish the checklist in the provider console, then click "Mark steps done". |
 | Stored credentials decrypt with the current key | ✅ pass | You — deployment / infrastructure | Done |
 
-### Values you must supply
-
-Never paste these into chat or commit them. The wizard writes to a gitignored `.env` (mode 0600).
-
-| Variable | Secret | What it is | Command |
-|---|---|---|---|
-| `APP_ENCRYPTION_KEY` | yes | Generate with: openssl rand -base64 32. The wizard can generate one for you. | `npm run setup -- --generate-key` |
-
 ### What can be done from this repository now
 
-- Verification is blocked until the credentials above are set. Then run `npm run setup -- --work encryption-key --record`.
-- Generate `APP_ENCRYPTION_KEY` automatically: `npm run setup -- --generate-key`.
+- Live verification PASSED. Persist it with `npm run setup -- --work encryption-key --record` (audit-logged).
 
 ### What only you can do
 
-- Supply 1 environment value(s): `APP_ENCRYPTION_KEY`.
 - Complete 3 deployment step(s).
 
 ### Deployment steps
@@ -151,7 +141,7 @@ The deployment itself. OAuth providers and Instagram require a real public HTTPS
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (2/3) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.492Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.636Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -170,7 +160,8 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 | Variable | Secret | What it is | Command |
 |---|---|---|---|
-| `PUBLIC_BASE_URL` | no | Exact origin registered with every OAuth provider and Stripe, e.g. https://studio.example.com | `npm run setup -- --set PUBLIC_BASE_URL=<VALUE>` |
+| `PUBLIC_BASE_URL` | no | Exact origin registered with every OAuth provider and Stripe, e.g. https://filmclublens.com | `npm run setup -- --set PUBLIC_BASE_URL=<VALUE>` |
+| `NODE_ENV` | no | Set to production for a real deployment. | `npm run setup -- --set NODE_ENV=<VALUE>` |
 | `SECURE_COOKIES` | no | Set to true when served over HTTPS. | `npm run setup -- --set SECURE_COOKIES=<VALUE>` |
 
 ### Callback / webhook URLs
@@ -189,7 +180,7 @@ Derived from `PUBLIC_BASE_URL=https://YOUR-DOMAIN`. Register these **exactly** (
 
 ### What only you can do
 
-- Supply 2 environment value(s): `PUBLIC_BASE_URL`, `SECURE_COOKIES`.
+- Supply 3 environment value(s): `PUBLIC_BASE_URL`, `NODE_ENV`, `SECURE_COOKIES`.
 - Complete 7 deployment step(s).
 
 ### Deployment steps
@@ -239,7 +230,7 @@ Knex already supports PostgreSQL via DATABASE_URL, including schema creation, se
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/1) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.492Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.636Z |
 | Completion audit | 1/4 criteria |
 
 ### Completion criteria
@@ -257,7 +248,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 
 | Variable | Secret | What it is | Command |
 |---|---|---|---|
-| `DATABASE_URL` | no | postgresql://user:password@host:5432/faceless_studio — include the database name. | `npm run setup -- --set DATABASE_URL=<VALUE>` |
+| `DATABASE_URL` | no | postgresql://user:password@host:5432/filmclublens?sslmode=require — include the database name. | `npm run setup -- --set DATABASE_URL=<VALUE>` |
 
 ### What can be done from this repository now
 
@@ -266,20 +257,23 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 ### What only you can do
 
 - Supply 1 environment value(s): `DATABASE_URL`.
-- Complete 5 deployment step(s).
+- Complete 7 deployment step(s).
 
 ### Deployment steps
 
-1. **Provision PostgreSQL.** Use a managed instance with TLS. Create an empty database; the app creates and migrates tables on startup.
-2. **Use a least-privilege role.** Grant only the application schema privileges needed by the app user.
-3. **Enable TLS.** Append ?sslmode=require if your provider needs it, and confirm the driver accepts the certificate chain.
-4. **Run multiple workers.** Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.
-5. **Back up before migrating.** SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.
+1. **Create the database.** Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example filmclublens); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.
+2. **Copy the direct connection URL.** Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/filmclublens?sslmode=require
+3. **Store it as a secret.** Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.
+4. **Prove the connection and schema.** With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.
+5. **Use a least-privilege role.** Grant only the schema privileges the app needs and keep superuser out of the runtime role.
+6. **Run multiple workers.** Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.
+7. **Back up before migrating.** SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.
 
 ### Verify it works
 
-1. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
-2. **Check doctor.** npm run doctor should report "Production database" as PASS.
+1. **Run the bootstrap proof.** DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution. Then npm run activate -- postgres --verify-only re-checks the server version, TLS and schema readiness.
+2. **Start two workers.** Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).
+3. **Check doctor.** npm run doctor should report "Production database" as PASS.
 
 ### Official documentation
 
@@ -317,15 +311,15 @@ OpenAI, Anthropic, and Gemini adapters for scripts, scene plans, captions and ha
 | Check | Value |
 |---|---|
 | Offline preflight | ready (4/4) |
-| Live verification | verified — 2026-10-28T07:09:31.492Z |
-| Completion audit | 2/4 criteria |
+| Live verification | verified — 2026-10-30T09:24:24.635Z |
+| Completion audit | 3/4 criteria |
 
 ### Completion criteria
 
 | Criterion | Status | Owner | Next action |
 |---|---|---|---|
 | Local configuration | ✅ pass | You — server environment | Done |
-| Live verification passed | ⬜ pending | This repository (automatable) | Click Verify (this module is checked offline). |
+| Live verification passed | ✅ pass | This repository (automatable) | Done |
 | Provider / deployment steps confirmed | ⬜ pending | You — provider console | Finish the checklist in the provider console, then click "Mark steps done". |
 | AI provider active | ✅ pass | You — server environment | Done |
 
@@ -387,15 +381,15 @@ Optional web research that feeds sourced context into script generation. Default
 | Check | Value |
 |---|---|
 | Offline preflight | ready (1/1) |
-| Live verification | verified — 2026-10-28T07:09:31.492Z |
-| Completion audit | 2/4 criteria |
+| Live verification | verified — 2026-10-30T09:24:24.635Z |
+| Completion audit | 3/4 criteria |
 
 ### Completion criteria
 
 | Criterion | Status | Owner | Next action |
 |---|---|---|---|
 | Local configuration | ✅ pass | You — server environment | Done |
-| Live verification passed | ⬜ pending | This repository (automatable) | Click Verify (this module is checked offline). |
+| Live verification passed | ✅ pass | This repository (automatable) | Done |
 | Provider / deployment steps confirmed | ⬜ pending | You — provider console | Finish the checklist in the provider console, then click "Mark steps done". |
 | Research provider active | ✅ pass | You — server environment | Done |
 
@@ -456,15 +450,15 @@ Optional generative scene images. The default procedural SVG engine creates orig
 | Check | Value |
 |---|---|
 | Offline preflight | ready (3/3) |
-| Live verification | verified — 2026-10-28T07:09:31.492Z |
-| Completion audit | 2/4 criteria |
+| Live verification | verified — 2026-10-30T09:24:24.636Z |
+| Completion audit | 3/4 criteria |
 
 ### Completion criteria
 
 | Criterion | Status | Owner | Next action |
 |---|---|---|---|
 | Local configuration | ✅ pass | You — server environment | Done |
-| Live verification passed | ⬜ pending | This repository (automatable) | Click Verify (this module is checked offline). |
+| Live verification passed | ✅ pass | This repository (automatable) | Done |
 | Provider / deployment steps confirmed | ⬜ pending | You — provider console | Finish the checklist in the provider console, then click "Mark steps done". |
 | image provider active | ✅ pass | You — server environment | Done |
 
@@ -525,15 +519,15 @@ Optional higher-quality narration. The default offline mespeak engine supports t
 | Check | Value |
 |---|---|
 | Offline preflight | ready (3/3) |
-| Live verification | verified — 2026-10-28T07:09:31.492Z |
-| Completion audit | 2/4 criteria |
+| Live verification | verified — 2026-10-30T09:24:24.636Z |
+| Completion audit | 3/4 criteria |
 
 ### Completion criteria
 
 | Criterion | Status | Owner | Next action |
 |---|---|---|---|
 | Local configuration | ✅ pass | You — server environment | Done |
-| Live verification passed | ⬜ pending | This repository (automatable) | Click Verify (this module is checked offline). |
+| Live verification passed | ✅ pass | This repository (automatable) | Done |
 | Provider / deployment steps confirmed | ⬜ pending | You — provider console | Finish the checklist in the provider console, then click "Mark steps done". |
 | TTS provider active | ✅ pass | You — server environment | Done |
 
@@ -594,7 +588,7 @@ Nodemailer transport that mirrors in-app notifications to email. Fully implement
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (1/2) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.492Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/4 criteria |
 
 ### Completion criteria
@@ -663,12 +657,12 @@ steps you have not done — the audit must stay truthful.
 
 `id: notification-webhook` · category: `notifications` · type: `config` · **UNFINISHED**
 
-Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
+Outbound notification events with HMAC-SHA256 X-Film-Club-Lens-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.
 
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/2) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.492Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/4 criteria |
 
 ### Completion criteria
@@ -701,7 +695,7 @@ Never paste these into chat or commit them. The wizard writes to a gitignored `.
 ### Provider console steps
 
 1. **Generate a shared secret.** e.g. openssl rand -hex 24. Store the same value in your receiver.
-2. **Verify the signature.** Compute sha256 HMAC over "<x-faceless-timestamp>.<raw body>" and compare with a constant-time comparison against X-Faceless-Signature (sha256=…).
+2. **Verify the signature.** Compute sha256 HMAC over "<x-film-club-lens-timestamp>.<raw body>" and compare with a constant-time comparison against X-Film-Club-Lens-Signature (sha256=…).
 3. **Enforce a timestamp window.** Reject events older than 5 minutes to prevent replay.
 4. **Deduplicate by event id.** Delivery retries (3 attempts) can repeat the same notification.
 
@@ -742,7 +736,7 @@ Official Meta OAuth connect and video publishing to Facebook Pages. Adapters, to
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (1/5) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.491Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.634Z |
 | Completion audit | 0/6 criteria |
 
 ### Completion criteria
@@ -851,7 +845,7 @@ Reels publishing via the Meta Graph container API. Shares the Facebook OAuth app
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/5) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.491Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/7 criteria |
 
 ### Completion criteria
@@ -960,7 +954,7 @@ Resumable uploads, captions, Data API engagement, Analytics API watch time/share
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.491Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/7 criteria |
 
 ### Completion criteria
@@ -1069,7 +1063,7 @@ OAuth 1.0a user-context connect, chunked v1.1 media upload, v2 post creation, pu
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.491Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -1173,7 +1167,7 @@ Subscription checkout, signature-verified webhooks, idempotent event storage, an
 | Check | Value |
 |---|---|
 | Offline preflight | incomplete (0/4) |
-| Live verification | unconfigured — 2026-10-28T07:09:31.492Z |
+| Live verification | unconfigured — 2026-10-30T09:24:24.635Z |
 | Completion audit | 0/5 criteria |
 
 ### Completion criteria
@@ -1280,7 +1274,7 @@ The four provider-console approval workflows (Meta, Google, X, Stripe). These ca
 | Check | Value |
 |---|---|
 | Offline preflight | external (0/5) |
-| Live verification | unsupported — 2026-10-28T07:09:31.493Z |
+| Live verification | unsupported — 2026-10-30T09:24:24.637Z |
 | Completion audit | 0/3 criteria |
 
 ### Completion criteria

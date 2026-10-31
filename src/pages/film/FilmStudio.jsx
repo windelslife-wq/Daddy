@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight, CheckCircle2, Clapperboard, Coins, Download, Film as FilmIcon,
-  Image as ImageIcon, Info, Layers, Mic2, PenLine, Play, Plus, RefreshCw,
+  Image as ImageIcon, Info, Layers, Mic2, Music, PenLine, Play, Plus, RefreshCw,
   Scissors, Smartphone, Sparkles, Trash2, Upload, Users, WandSparkles,
 } from 'lucide-react';
 import { get, post, patch, put, del, api, formatDate } from '../../api.js';
@@ -20,13 +20,19 @@ export const bumpCredits = () => window.dispatchEvent(new Event(CREDIT_EVENT));
 
 export const pretty = (value) => String(value || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-const TYPE_LABELS = { short_drama: 'Short drama', long_drama: 'Long drama', movie: 'Movie', episode: 'Series episode' };
+const TYPE_LABELS = {
+  short_drama: 'Short drama', long_drama: 'Long drama', movie: 'Movie', episode: 'Series episode',
+  advertisement: 'Advertisement', music_video: 'Music video', cinematic_scene: 'Cinematic scene',
+};
 
 const FORMATS = [
   { id: 'short_drama', icon: Smartphone, title: 'Short Drama', body: '45–90 second vertical dramas for TikTok, Shorts, Reels and Facebook.', tag: '9:16 · 1–3 min', colour: 'primary' },
   { id: 'long_drama', icon: FilmIcon, title: 'Long Drama', body: 'Multi-scene stories assembled scene-by-scene into one continuous film.', tag: '16:9 or 9:16 · 5–60 min', colour: 'cyan' },
   { id: 'movie', icon: Clapperboard, title: 'Movie', body: 'Feature-length projects built from hundreds of real AI clips, with cast continuity, sound design and subtitles.', tag: '16:9 · 30–60 min', colour: 'amber' },
   { id: 'series', icon: Layers, title: 'Episodic Series', body: 'Seasons, episodes, story bibles, recurring characters, thumbnails and credits.', tag: 'Seasons & episodes', colour: 'green' },
+  { id: 'advertisement', icon: Sparkles, title: 'Advertisement', body: 'Product films, brand campaigns and social ads with consistent characters and locations.', tag: '15–120 s · 9:16 or 16:9', colour: 'primary' },
+  { id: 'music_video', icon: Music, title: 'Music Video', body: 'Beat-driven visuals, performance scenes and cinematic transitions edited on one timeline.', tag: '1–5 min', colour: 'cyan' },
+  { id: 'cinematic_scene', icon: Clapperboard, title: 'Cinematic Scene', body: 'A single directed scene or trailer beat — shot list, camera direction and sound design.', tag: '1–3 min', colour: 'amber' },
 ];
 
 /** Long-form duration shortcuts, in seconds. Any value between the limits works. */
@@ -187,9 +193,10 @@ export function NewProjectModal({ defaultType = 'short_drama', onClose, onCreate
   const [form, setForm] = useState({
     type: defaultType === 'series' ? 'episode' : defaultType,
     title: '', idea: '', genre: 'african_stories', language: 'en', style: 'cinematic',
-    aspectRatio: defaultType === 'short_drama' ? '9:16' : '16:9',
-    targetPlatform: defaultType === 'short_drama' ? 'tiktok' : 'youtube',
-    targetDurationSeconds: defaultType === 'short_drama' ? 60 : defaultType === 'long_drama' ? 600 : 1800,
+    aspectRatio: ['short_drama', 'advertisement'].includes(defaultType) ? '9:16' : '16:9',
+    targetPlatform: ['short_drama', 'advertisement'].includes(defaultType) ? 'tiktok' : 'youtube',
+    targetDurationSeconds: defaultType === 'advertisement' ? 30 : defaultType === 'music_video' ? 180
+      : defaultType === 'cinematic_scene' ? 90 : defaultType === 'short_drama' ? 60 : defaultType === 'long_drama' ? 600 : 1800,
     sceneProvider: '',
   });
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
@@ -230,7 +237,7 @@ export function NewProjectModal({ defaultType = 'short_drama', onClose, onCreate
         <div className="film-form-grid">
           <Field label="Project title" required><input className="input" value={form.title} onChange={(e) => update('title', e.target.value)} placeholder="e.g. The Last Message" required /></Field>
           <Field label="Format"><select className="input" value={form.type} onChange={(e) => update('type', e.target.value)}>
-            <option value="short_drama">Short drama</option><option value="long_drama">Long drama</option><option value="movie">Movie</option><option value="episode">Series episode</option>
+            {Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select></Field>
           <Field label="Genre"><select className="input" value={form.genre} onChange={(e) => update('genre', e.target.value)}>
             {(config?.genres || ['drama']).map((item) => <option key={item} value={item}>{pretty(item)}</option>)}
@@ -372,7 +379,7 @@ function ScriptWriter() {
           <ErrorBanner error={error} />
           <Field label="Story idea" required hint="Describe the premise, characters and the emotional turn."><textarea className="input" rows={4} value={form.idea} onChange={(e) => update('idea', e.target.value)} placeholder="A young chef returns home and discovers her family's restaurant is about to be sold…" required /></Field>
           <div className="film-form-grid">
-            <Field label="Format"><select className="input" value={form.type} onChange={(e) => update('type', e.target.value)}>{['short_drama', 'long_drama', 'movie', 'episode'].map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}</select></Field>
+            <Field label="Format"><select className="input" value={form.type} onChange={(e) => update('type', e.target.value)}>{Object.keys(TYPE_LABELS).map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}</select></Field>
             <Field label="Genre"><select className="input" value={form.genre} onChange={(e) => update('genre', e.target.value)}>{(config?.genres || ['drama']).map((g) => <option key={g} value={g}>{pretty(g)}</option>)}</select></Field>
             <Field label="Language"><select className="input" value={form.language} onChange={(e) => update('language', e.target.value)}>{(config?.languages || ['en']).map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}</select></Field>
             <Field label="Visual style"><select className="input" value={form.style} onChange={(e) => update('style', e.target.value)}>{(config?.styles || ['cinematic']).map((s) => <option key={s} value={s}>{pretty(s)}</option>)}</select></Field>
@@ -664,7 +671,12 @@ export default function FilmStudio({ view = 'hub' }) {
     default: body = <Hub />;
   }
   return (
-    <FilmShell view={view} title={title} subtitle={subtitle} actions={view === 'hub' ? <Button onClick={() => navigate('/app/films/scripts')}><PenLine size={15} /> Open AI Script Writer</Button> : undefined}>
+    <FilmShell view={view} title={title} subtitle={subtitle} actions={view === 'hub' ? (
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button onClick={() => navigate('/app/films/agent')}><Sparkles size={15} /> AI Production Agent</Button>
+        <Button variant="secondary" onClick={() => navigate('/app/films/scripts')}><PenLine size={15} /> AI Script Writer</Button>
+      </div>
+    ) : undefined}>
       {body}
     </FilmShell>
   );

@@ -30,7 +30,7 @@ const flag = (name) => args.includes(`--${name}`);
 const valueOf = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.split('=').slice(1).join('=') ?? null;
 
 const baseUrl = (valueOf('base-url') || process.env.APP_URL || `http://127.0.0.1:${process.env.PORT || 8787}`).replace(/\/$/, '');
-const email = valueOf('email') || process.env.DEMO_EMAIL || 'creator@faceless.local';
+const email = valueOf('email') || process.env.DEMO_EMAIL || 'creator@filmclublens.local';
 const password = valueOf('password') || process.env.DEMO_PASSWORD || 'StudioDemo2026!';
 const seconds = Number(valueOf('seconds') || 20);
 const aspectRatio = valueOf('aspect') || '16:9';
@@ -107,7 +107,7 @@ async function upload(kind, filePath, extra = {}) {
 // ---------------------------------------------------------------------------
 // Preconditions — fail closed, never pretend
 // ---------------------------------------------------------------------------
-console.log('\nFaceless Studio — complete-film acceptance (Phase 2)');
+console.log('\nFilm Club Lens — complete-film acceptance (Phase 2)');
 console.log(`target ${baseUrl} · ${seconds}s · ${aspectRatio} · publish=${publish}\n`);
 
 let login;

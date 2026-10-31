@@ -8,9 +8,9 @@
  * every OAuth/webhook callback path. Nothing is faked; a check either reaches
  * the real origin or fails.
  *
- *   npm run deploy:check -- --origin https://studio.example.com
- *   npm run deploy:check -- --origin https://studio.example.com --json
- *   npm run deploy:check -- --origin https://studio.example.com \
+ *   npm run deploy:check -- --origin https://filmclublens.com
+ *   npm run deploy:check -- --origin https://filmclublens.com --json
+ *   npm run deploy:check -- --origin https://filmclublens.com \
  *       --email admin@example.com --password '…' --media-url 'https://…/media/…'
  *
  * For local self-signed tests only: add --insecure --allow-local.
@@ -48,7 +48,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: npm run deploy:check -- --origin https://studio.example.com [options]
+  console.log(`Usage: npm run deploy:check -- --origin https://filmclublens.com [options]
 
 Options:
   --origin <url>       Public HTTPS origin (default: PUBLIC_BASE_URL or https://$DOMAIN)

@@ -11,7 +11,7 @@ function assertUnique(items, label) {
 }
 
 test('public site map is complete and internally consistent', () => {
-  assert.equal(SITE.name, 'Faceless Studio');
+  assert.equal(SITE.name, 'Film Club Lens');
   assert.ok(PUBLIC_PAGES.length >= 20, 'Expected a complete public website');
   assertUnique(PUBLIC_PAGES, 'PUBLIC_PAGES');
   assertUnique(APP_PAGES, 'APP_PAGES');

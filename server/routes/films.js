@@ -29,8 +29,39 @@ import {
   ownedFilm, queueFilmScenes, pauseFilmGeneration, resumeFilmGeneration,
   cancelFilmGeneration, cancelSceneGeneration, retryFailedScenes, filmProgress,
   cancelFilmAssembly, addSfxAsset, deleteSfxAsset, sfxAssetList, validateSceneProvider,
+  splitScene, cloneCharacter, castLibrary,
 } from '../film/scenes.js';
 import { assemblyPreflight } from '../film/assembly.js';
+import { cinematographyCatalog } from '../film/cinematography.js';
+import {
+  locationSchema, patchLocationSchema,
+  listLocations, createLocation, updateLocation, deleteLocation,
+} from '../film/locations.js';
+import { filmQualityReport } from '../film/continuity.js';
+import {
+  storyboardOverview, generateStoryboard, generatePoster, generateCharacterConcept, ownedFrame,
+  queueStoryboard,
+} from '../film/storyboard.js';
+import { voiceOverview, generateVoiceTakes, sceneTakePath, queueVoiceTakes } from '../film/voice.js';
+import {
+  createFlow, listFlows, updateFlow, deleteFlow, runFlow, ownedFlow, flowArtifact, flowView, NODE_TYPES,
+} from '../film/canvas.js';
+import { listModels } from '../film/models.js';
+import { editingOverview, updateSceneTrack, listVfxPresets } from '../film/editing.js';
+import { overlayAssetList, addOverlayAsset, deleteOverlayAsset } from '../film/overlays.js';
+import { lipSyncStatus, sceneLipSync, queueLipSync } from '../film/lipsync.js';
+import { vfxOverview, motionStatus, sceneMotionStatus, queueMotionTransfer } from '../film/vfx.js';
+import {
+  listProps, createProp, updateProp, deleteProp, setSceneProps,
+} from '../film/props.js';
+import {
+  listBrandKits, upsertBrandKit, deleteBrandKit, attachBrandKit, brandKitView,
+  adVariants, generateAdVariations, applyAdVariant, generateProductShot,
+} from '../film/ads.js';
+import {
+  startProduction, productionSnapshot, advanceProduction, cancelProduction,
+  listProductions, PRODUCTION_STAGES, reviseProduction, scheduleProduction,
+} from '../film/production.js';
 import {
   seriesSchema, episodeSchema, patchEpisodeSchema, EPISODE_STATUSES,
   createSeries, listSeries, seriesDetail, updateSeries, deleteSeries,
@@ -80,7 +111,7 @@ const estimateSchema = z.object({
 });
 
 const uploadKindSchema = z.object({
-  kind: z.enum(['reference', 'music', 'character', 'sfx']),
+  kind: z.enum(['reference', 'music', 'character', 'sfx', 'overlay']),
   characterId: z.string().max(48).optional(),
   name: z.string().max(120).optional(),
 });
@@ -122,6 +153,7 @@ export function filmRouter() {
     res.json({
       types: FILM_TYPES, genres: FILM_GENRES, styles: FILM_STYLES,
       aspectRatios: FILM_ASPECTS, platforms: FILM_PLATFORMS,
+      cinematography: cinematographyCatalog(),
       languages: ['en', 'es', 'fr', 'de', 'pt', 'it', 'nl', 'pl', 'tr', 'zh', 'ha', 'yo', 'ig', 'sw', 'ar', 'hi'],
       voices: ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer', 'sage', 'eleven-default'],
       limits,
@@ -148,6 +180,170 @@ export function filmRouter() {
       ttsProvider: config.media.ttsProvider,
       videoProvider: provider,
     });
+  }));
+
+  // ---- Production agent ----------------------------------------------------
+  router.get('/production', h(async (req, res) => {
+    res.json({ productions: await listProductions(req.user.id), stages: PRODUCTION_STAGES });
+  }));
+
+  // ---- Audio stems ---------------------------------------------------------
+  router.get('/:id/stems', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const dir = path.join(projectDir(`film_${film.id}`), 'stems');
+    let files = [];
+    try { files = await fsp.readdir(dir); } catch { files = []; }
+    const stems = await Promise.all(files.map(async (file) => {
+      const stat = await fsp.stat(path.join(dir, file)).catch(() => null);
+      return { kind: path.basename(file, path.extname(file)), filename: file, bytes: stat?.size || 0, exists: Boolean(stat) };
+    }));
+    res.json({
+      stems,
+      available: stems.some((stem) => stem.exists),
+      note: stems.length ? 'Rendered from the last completed assembly.' : 'Render the film to export stems.',
+    });
+  }));
+
+  router.get('/:id/stems/:kind', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const kind = String(req.params.kind).toLowerCase();
+    if (!['voice', 'sfx', 'music'].includes(kind)) throw badRequest('Unknown stem. Choose voice, sfx or music.');
+    const dir = path.join(projectDir(`film_${film.id}`), 'stems');
+    const files = await fsp.readdir(dir).catch(() => []);
+    const match = files.find((file) => path.basename(file, path.extname(file)) === kind);
+    if (!match) throw notFound('That stem has not been exported yet. Render the film first.');
+    const filename = `${kind}-${film.id}${kind === 'music' ? path.extname(match) : '.wav'}`;
+    await streamFile(req, res, path.join(dir, match), filename, { download: true });
+  }));
+
+  // ---- Props library (continuity) -----------------------------------------
+  router.get('/props', h(async (req, res) => {
+    res.json({ props: await listProps(req.user.id, { filmId: req.query.filmId }) });
+  }));
+
+  router.post('/props', h(async (req, res) => {
+    res.status(201).json({ prop: await createProp(req.user.id, req.body?.filmId || req.query.filmId || null, req.body || {}, req.user.role) });
+  }));
+
+  router.patch('/props/:propId', h(async (req, res) => {
+    res.json({ prop: await updateProp(req.user.id, req.params.propId, req.body || {}) });
+  }));
+
+  router.delete('/props/:propId', h(async (req, res) => {
+    res.json(await deleteProp(req.user.id, req.params.propId));
+  }));
+
+  // ---- Brand kits / advertisement studio ----------------------------------
+  router.get('/brand-kits', h(async (req, res) => {
+    res.json({ brandKits: await listBrandKits(req.user.id) });
+  }));
+
+  router.post('/brand-kits', h(async (req, res) => {
+    res.status(201).json({ brandKit: await upsertBrandKit(req.user.id, req.body || {}) });
+  }));
+
+  router.delete('/brand-kits/:brandKitId', h(async (req, res) => {
+    res.json(await deleteBrandKit(req.user.id, req.params.brandKitId));
+  }));
+
+  router.post('/brand-kits/:brandKitId/logo', upload.single('file'), h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit) throw notFound('Brand kit not found.');
+    if (!req.file) throw badRequest('Choose a PNG, JPEG or WebP logo.');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(req.file.mimetype)) throw badRequest('The logo must be a PNG, JPEG or WebP image.');
+    if (req.file.size > config.film.maxReferenceImageMb * 1024 * 1024) throw badRequest(`Logos must be under ${config.film.maxReferenceImageMb} MB.`);
+    const dir = path.join(config.storageDir, 'brand-kits');
+    await fsp.mkdir(dir, { recursive: true });
+    const ext = req.file.mimetype === 'image/png' ? 'png' : req.file.mimetype === 'image/webp' ? 'webp' : 'jpg';
+    const destination = path.join(dir, `${kit.id}.${ext}`);
+    await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    await db('brand_kits').where({ id: kit.id }).update({ logo_path: destination, updated_at: now() });
+    res.status(201).json({ uploaded: true, brandKit: brandKitView(await db('brand_kits').where({ id: kit.id }).first()) });
+  }));
+
+  router.post('/brand-kits/:brandKitId/product-shot', h(async (req, res) => {
+    res.status(201).json(await generateProductShot(req.user.id, req.params.brandKitId));
+  }));
+
+  router.get('/brand-kits/:brandKitId/product-image', h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit?.product_image_path) throw notFound('No product shot has been generated for this brand kit.');
+    await streamFile(req, res, kit.product_image_path, `product-${kit.id}.png`);
+  }));
+
+  router.get('/brand-kits/:brandKitId/logo', h(async (req, res) => {
+    const kit = await db('brand_kits').where({ id: req.params.brandKitId, user_id: req.user.id }).first();
+    if (!kit?.logo_path) throw notFound('No logo uploaded for this brand kit.');
+    await streamFile(req, res, kit.logo_path, `brand-logo-${kit.id}${path.extname(kit.logo_path)}`);
+  }));
+
+  // ---- Overlay images (picture-in-picture tracks) --------------------------
+  router.get('/:id/overlays', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json({ overlays: await overlayAssetList(req.params.id) });
+  }));
+
+  router.delete('/:id/overlays/:overlayId', h(async (req, res) => {
+    res.json(await deleteOverlayAsset(req.user.id, req.params.id, req.params.overlayId, req.user.role));
+  }));
+
+  // ---- Reusable cast library ----------------------------------------------
+  router.get('/cast-library', h(async (req, res) => {
+    res.json({ characters: await castLibrary(req.user.id) });
+  }));
+
+  // ---- Model marketplace (live readiness, no fake activation) --------------
+  router.get('/models', h(async (req, res) => {
+    res.json(listModels());
+  }));
+
+  // ---- Multi-track edit / VFX / lip-sync ----------------------------------
+  router.get('/vfx', h(async (req, res) => {
+    res.json({ ...(await vfxOverview()), presets: listVfxPresets() });
+  }));
+
+  router.get('/lipsync', h(async (req, res) => {
+    res.json(await lipSyncStatus());
+  }));
+
+  router.get('/motion', h(async (req, res) => {
+    res.json(await motionStatus());
+  }));
+
+  // ---- Creative canvas -----------------------------------------------------
+  router.get('/flows', h(async (req, res) => {
+    res.json({ flows: await listFlows(req.user.id, { filmId: req.query.filmId }), nodeTypes: NODE_TYPES });
+  }));
+
+  router.post('/flows', h(async (req, res) => {
+    res.status(201).json({ flow: await createFlow(req.user.id, req.body || {}) });
+  }));
+
+  router.get('/flows/:flowId', h(async (req, res) => {
+    const flow = await ownedFlow(req.user.id, req.params.flowId);
+    res.json({ flow: flowView(flow), nodeTypes: NODE_TYPES });
+  }));
+
+  router.patch('/flows/:flowId', h(async (req, res) => {
+    res.json({ flow: await updateFlow(req.user.id, req.params.flowId, req.body || {}) });
+  }));
+
+  router.delete('/flows/:flowId', h(async (req, res) => {
+    res.json(await deleteFlow(req.user.id, req.params.flowId));
+  }));
+
+  router.post('/flows/:flowId/run', h(async (req, res) => {
+    res.json(await runFlow(req.user.id, req.params.flowId, { force: Boolean(req.body?.force) }));
+  }));
+
+  router.get('/flows/:flowId/artifact/:filename', h(async (req, res) => {
+    const filePath = await flowArtifact(req.user.id, req.params.flowId, req.params.filename);
+    await streamFile(req, res, filePath, path.basename(filePath));
+  }));
+
+  router.post('/production/start', h(async (req, res) => {
+    const result = await startProduction(req.user.id, req.body || {}, req.user.role);
+    res.status(201).json(result);
   }));
 
   router.post('/estimate', h(async (req, res) => {
@@ -191,6 +387,10 @@ export function filmRouter() {
   }));
 
   // ---- Character studio ----------------------------------------------------
+  router.post('/characters/:characterId/clone', h(async (req, res) => {
+    res.status(201).json({ character: await cloneCharacter(req.user.id, req.params.characterId, req.body?.filmId || null, req.user.role) });
+  }));
+
   router.get('/characters', h(async (req, res) => {
     res.json({ characters: await listCharacters(req.user.id, { filmId: req.query.filmId, seriesId: req.query.seriesId }) });
   }));
@@ -309,6 +509,160 @@ export function filmRouter() {
     res.json(await saveScreenplay(req.user.id, req.params.id, data.screenplay, req.user.role));
   }));
 
+  // ---- Locations library ---------------------------------------------------
+  router.get('/:id/locations', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json({ locations: await listLocations(req.user.id, { filmId: film.id, seriesId: film.series_id || undefined }) });
+  }));
+
+  router.post('/:id/locations', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const data = locationSchema.parse({ ...(req.body || {}), filmId: film.id, seriesId: null });
+    res.status(201).json({ location: await createLocation(req.user.id, data, req.user.role) });
+  }));
+
+  router.patch('/:id/locations/:locationId', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    const data = patchLocationSchema.parse(req.body || {});
+    // Scope is fixed by the project the request came through.
+    delete data.filmId; delete data.seriesId;
+    res.json({ location: await updateLocation(req.user.id, req.params.locationId, data, req.user.role) });
+  }));
+
+  router.delete('/:id/locations/:locationId', h(async (req, res) => {
+    await ownedFilm(req.user.id, req.params.id, req.user.role);
+    res.json(await deleteLocation(req.user.id, req.params.locationId));
+  }));
+
+  // ---- Production agent (per project) --------------------------------------
+  router.get('/:id/production', h(async (req, res) => {
+    res.json(await productionSnapshot(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/production/schedule', h(async (req, res) => {
+    res.status(202).json(await scheduleProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/production/revise', h(async (req, res) => {
+    res.json(await reviseProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/production/advance', h(async (req, res) => {
+    res.json(await advanceProduction(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/production/cancel', h(async (req, res) => {
+    res.json(await cancelProduction(req.user.id, req.params.id, req.user.role));
+  }));
+
+  // ---- Storyboard, poster and character concept art ------------------------
+  router.get('/:id/storyboard', h(async (req, res) => {
+    res.json(await storyboardOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/storyboard', h(async (req, res) => {
+    if (req.body?.queue) {
+      res.status(202).json(await queueStoryboard(req.user.id, req.params.id, req.body || {}, req.user.role));
+      return;
+    }
+    res.json(await generateStoryboard(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/storyboard/:frameId/image', h(async (req, res) => {
+    const frame = await ownedFrame(req.user.id, req.params.id, req.params.frameId, req.user.role);
+    if (!frame.path) throw notFound('This frame has no image.');
+    await streamFile(req, res, frame.path, path.basename(frame.path));
+  }));
+
+  router.post('/:id/poster', h(async (req, res) => {
+    res.json(await generatePoster(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.get('/:id/poster/image', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    if (!film.poster_path) throw notFound('No poster has been rendered yet.');
+    await streamFile(req, res, film.poster_path, `poster-${req.params.id}.png`);
+  }));
+
+  router.post('/:id/characters/:characterId/concept', h(async (req, res) => {
+    res.json(await generateCharacterConcept(req.user.id, req.params.id, req.params.characterId, req.user.role));
+  }));
+
+  // ---- Advertisement studio (brand kit + variations) ----------------------
+  router.get('/:id/ads', h(async (req, res) => {
+    res.json(await adVariants(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/ads/attach', h(async (req, res) => {
+    const brandKitId = req.body?.brandKitId || null;
+    res.json(await attachBrandKit(req.user.id, req.params.id, brandKitId, req.user.role));
+  }));
+
+  router.post('/:id/ads/variations', h(async (req, res) => {
+    res.json(await generateAdVariations(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.post('/:id/ads/variations/:variantId/apply', h(async (req, res) => {
+    res.json(await applyAdVariant(req.user.id, req.params.id, req.params.variantId, req.user.role));
+  }));
+
+  // ---- Editing: scene props and splitting --------------------------------
+  router.put('/:id/scenes/:sceneId/props', h(async (req, res) => {
+    res.json({ props: await setSceneProps(req.user.id, req.params.id, req.params.sceneId, req.body?.props || [], req.user.role) });
+  }));
+
+  router.post('/:id/scenes/:sceneId/split', h(async (req, res) => {
+    res.json(await splitScene(req.user.id, req.params.id, req.params.sceneId, req.body?.atSeconds, req.user.role));
+  }));
+
+  // ---- Editing tracks, VFX and lip-sync (per scene) -----------------------
+  router.get('/:id/editing', h(async (req, res) => {
+    res.json(await editingOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/track', h(async (req, res) => {
+    res.json(await updateSceneTrack(req.user.id, req.params.id, req.params.sceneId, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/lipsync', h(async (req, res) => {
+    res.json(await sceneLipSync(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/lipsync', h(async (req, res) => {
+    res.status(202).json(await queueLipSync(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/motion', h(async (req, res) => {
+    res.json(await sceneMotionStatus(req.user.id, req.params.id, req.params.sceneId, req.user.role));
+  }));
+
+  router.post('/:id/scenes/:sceneId/motion', h(async (req, res) => {
+    res.status(202).json(await queueMotionTransfer(req.user.id, req.params.id, req.params.sceneId, req.body || {}, req.user.role));
+  }));
+
+  // ---- Voice takes ---------------------------------------------------------
+  router.get('/:id/voice', h(async (req, res) => {
+    res.json(await voiceOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/voice', h(async (req, res) => {
+    if (req.body?.queue) {
+      res.status(202).json(await queueVoiceTakes(req.user.id, req.params.id, req.body || {}, req.user.role));
+      return;
+    }
+    res.json(await generateVoiceTakes(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/voice', h(async (req, res) => {
+    const take = await sceneTakePath(req.user.id, req.params.id, req.params.sceneId, req.user.role);
+    await streamFile(req, res, take.path, take.filename);
+  }));
+
+  // ---- Quality control / continuity ---------------------------------------
+  router.get('/:id/qc', h(async (req, res) => {
+    res.json(await filmQualityReport(req.user.id, req.params.id, req.user.role));
+  }));
+
   // ---- Scenes --------------------------------------------------------------
   router.get('/:id/scenes', h(async (req, res) => {
     res.json({ scenes: await listScenes(req.user.id, req.params.id, req.user.role) });
@@ -397,7 +751,14 @@ export function filmRouter() {
   }));
 
   router.patch('/:id/scenes/:sceneId', h(async (req, res) => {
-    res.json({ scene: await updateScene(req.user.id, req.params.id, req.params.sceneId, patchSceneSchema.parse(req.body || {}), req.user.role) });
+    const data = patchSceneSchema.parse(req.body || {});
+    const scene = await updateScene(req.user.id, req.params.id, req.params.sceneId, data, req.user.role);
+    // Props are linked separately so one request can update review notes and the
+    // prop continuity list together.
+    if (Array.isArray(req.body?.props)) {
+      await setSceneProps(req.user.id, req.params.id, req.params.sceneId, req.body.props, req.user.role);
+    }
+    res.json({ scene });
   }));
 
   router.delete('/:id/scenes/:sceneId', h(async (req, res) => {
@@ -476,6 +837,14 @@ export function filmRouter() {
     const filename = `${data.kind}-${Date.now()}.${ext}`;
     const destination = path.join(dir, filename);
     await fsp.writeFile(destination, req.file.buffer, { mode: 0o600 });
+    if (data.kind === 'overlay') {
+      const asset = await addOverlayAsset(req.user.id, film.id, {
+        name: data.name || path.basename(req.file.originalname || 'Overlay'),
+        path: destination, bytes: req.file.size,
+      }, req.user.role);
+      res.status(201).json({ uploaded: true, kind: 'overlay', asset });
+      return;
+    }
     if (data.kind === 'sfx') {
       const probe = await probeVideo(destination);
       if (!probe.durationSeconds) {

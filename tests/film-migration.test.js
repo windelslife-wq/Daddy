@@ -56,10 +56,14 @@ test('the long-form migration upgrades an existing install without losing record
   for (const column of projectColumns) {
     assert.equal(await db.schema.hasColumn('film_projects', column), true, `film_projects.${column} is added`);
   }
-  const sceneColumns = ['cast', 'sfx', 'cancel_requested', 'queued_at', 'provider_handle', 'progress', 'detail'];
+  const sceneColumns = [
+    'cast', 'sfx', 'cancel_requested', 'queued_at', 'provider_handle', 'progress', 'detail',
+    'location_id', 'shot_size', 'camera_angle', 'lens', 'lighting', 'color_grade', 'composition',
+  ];
   for (const column of sceneColumns) {
     assert.equal(await db.schema.hasColumn('film_scenes', column), true, `film_scenes.${column} is added`);
   }
+  assert.equal(await db.schema.hasTable('film_locations'), true, 'the locations library table is created on upgrade');
 
   const project = await db('film_projects').where({ id: 'flm_legacy' }).first();
   assert.equal(project.title, 'Shot before the upgrade');
@@ -74,6 +78,8 @@ test('the long-form migration upgrades an existing install without losing record
   assert.equal(scene.cast, '[]');
   assert.equal(scene.sfx, '[]');
   assert.equal(scene.cancel_requested, 0);
+  assert.equal(scene.shot_size, '', 'legacy scenes are undirected, not corrupted');
+  assert.equal(scene.location_id, null);
 });
 
 test('re-running the migration is idempotent', async () => {

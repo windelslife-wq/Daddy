@@ -54,6 +54,20 @@ export const tableDefinitions = {
     t.boolean('must_change_password').notNullable().defaultTo(false);
     t.index(['status']);
   },
+  // Developer API keys. Only a SHA-256 digest and a display prefix are stored,
+  // so a leaked database cannot be used to call the API.
+  api_keys: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('name', 120).notNullable();
+    t.string('prefix', 24).notNullable().unique();
+    t.string('key_hash', 64).notNullable();
+    t.text('scopes').notNullable().defaultTo('[]');
+    t.string('created_at', 40).notNullable();
+    t.string('last_used_at', 40);
+    t.string('revoked_at', 40);
+    t.integer('request_count').notNullable().defaultTo(0);
+  },
   sessions: (t) => {
     t.string('id', 48).primary();
     t.string('user_id', 48).notNullable().index();
@@ -296,6 +310,16 @@ export const tableDefinitions = {
     t.string('updated_at', 40).notNullable();
     t.string('updated_by', 48);
   },
+  // Provider configuration written by the Super Admin dashboard. Secrets inside
+  // `secrets` are AES-GCM ciphertext; the environment remains the fallback.
+  provider_config: (t) => {
+    t.string('id', 48).primary();
+    t.text('active').notNullable().defaultTo('{}');
+    t.text('models').notNullable().defaultTo('{}');
+    t.text('secrets').notNullable().defaultTo('{}');
+    t.string('updated_at', 40).notNullable();
+    t.string('updated_by', 48);
+  },
   audit_logs: (t) => {
     t.string('id', 48).primary();
     t.string('user_id', 48).index();
@@ -371,6 +395,9 @@ export const tableDefinitions = {
     t.integer('credits_spent').notNullable().defaultTo(0);
     t.text('final_video_path');
     t.text('thumbnail_path');
+    t.text('poster_path');
+    t.string('brand_kit_id', 48);
+    t.text('ad_variants').notNullable().defaultTo('[]');
     t.text('caption_path');
     t.integer('duration_seconds').notNullable().defaultTo(0);
     t.text('error');
@@ -396,12 +423,36 @@ export const tableDefinitions = {
     t.text('description').notNullable().defaultTo('');
     t.text('appearance_prompt').notNullable().defaultTo('');
     t.string('voice_preset', 60).notNullable().defaultTo('nova');
+    // Character depth: wardrobe, expression takes, relationships and reuse.
+    t.text('wardrobe').notNullable().defaultTo('');
+    t.text('expressions').notNullable().defaultTo('[]');
+    t.text('relationships').notNullable().defaultTo('[]');
+    t.string('age_range', 40).notNullable().defaultTo('');
+    t.integer('is_library').notNullable().defaultTo(0);
     t.string('voice_provider', 60);
     t.text('reference_image_path');
     t.text('metadata').notNullable().defaultTo('{}');
     t.string('created_at', 40).notNullable();
     t.string('updated_at', 40).notNullable();
     t.index(['user_id', 'film_id']);
+  },
+  film_locations: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('series_id', 48).index();
+    t.string('name', 160).notNullable();
+    t.text('description').notNullable().defaultTo('');
+    t.string('time_of_day', 60).notNullable().defaultTo('');
+    t.string('weather', 60).notNullable().defaultTo('');
+    t.string('palette', 120).notNullable().defaultTo('');
+    t.string('style', 60).notNullable().defaultTo('');
+    t.text('reference_image_path');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.index(['user_id', 'film_id']);
+    t.index(['user_id', 'series_id']);
   },
   film_scenes: (t) => {
     t.string('id', 48).primary();
@@ -410,7 +461,15 @@ export const tableDefinitions = {
     t.string('slug', 120).notNullable().defaultTo('');
     t.string('heading', 220).notNullable().defaultTo('');
     t.string('location', 220).notNullable().defaultTo('');
+    t.string('location_id', 48).index();
     t.string('time_of_day', 60).notNullable().defaultTo('');
+    // Cinematography controls (validated vocabularies in film/cinematography.js).
+    t.string('shot_size', 60).notNullable().defaultTo('');
+    t.string('camera_angle', 60).notNullable().defaultTo('');
+    t.string('lens', 40).notNullable().defaultTo('');
+    t.string('lighting', 60).notNullable().defaultTo('');
+    t.string('color_grade', 60).notNullable().defaultTo('');
+    t.text('composition').notNullable().defaultTo('');
     t.text('description').notNullable().defaultTo('');
     t.text('dialogue').notNullable().defaultTo('[]');
     t.string('camera_movement', 120).notNullable().defaultTo('');
@@ -434,9 +493,102 @@ export const tableDefinitions = {
     t.text('sfx').notNullable().defaultTo('[]');
     t.integer('cancel_requested').notNullable().defaultTo(0);
     t.string('queued_at', 40);
+    // Multi-track edit: text overlay, speed ramp, local VFX preset, lip-sync provenance.
+    t.text('overlay_json');
+    t.decimal('speed_factor', 5, 2).notNullable().defaultTo(1);
+    t.string('vfx_preset', 40).notNullable().defaultTo('none');
+    t.string('lipsync_provider', 60);
+    t.string('lipsync_at', 40);
     t.string('created_at', 40).notNullable();
     t.string('updated_at', 40).notNullable();
     t.unique(['film_id', 'ordinal']);
+  },
+  film_storyboard_frames: (t) => {
+    t.string('id', 48).primary();
+    t.string('film_id', 48).notNullable().index();
+    t.string('scene_id', 48).index();
+    t.string('kind', 20).notNullable().defaultTo('scene');
+    t.string('character_id', 48).index();
+    t.text('path');
+    t.string('provider', 60);
+    t.integer('width').notNullable().defaultTo(0);
+    t.integer('height').notNullable().defaultTo(0);
+    t.text('prompt');
+    t.string('status', 20).notNullable().defaultTo('ready');
+    t.text('error');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.unique(['film_id', 'scene_id', 'kind']);
+  },
+  film_flows: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('name', 160).notNullable().defaultTo('Untitled flow');
+    t.text('graph').notNullable().defaultTo('{}');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.text('last_run');
+    t.string('last_run_at', 40);
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
+  film_props: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('name', 160).notNullable();
+    t.text('description').notNullable().defaultTo('');
+    t.string('category', 60).notNullable().defaultTo('prop');
+    t.string('material', 80).notNullable().defaultTo('');
+    t.string('color', 60).notNullable().defaultTo('');
+    t.text('reference_image_path');
+    t.text('metadata').notNullable().defaultTo('{}');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
+  film_scene_props: (t) => {
+    t.string('film_id', 48).notNullable().index();
+    t.string('scene_id', 48).notNullable().index();
+    t.string('prop_id', 48).notNullable().index();
+    t.string('state', 120).notNullable().defaultTo('');
+    t.string('created_at', 40).notNullable();
+    t.unique(['scene_id', 'prop_id']);
+  },
+  brand_kits: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('name', 160).notNullable();
+    t.string('product', 160).notNullable().defaultTo('');
+    t.text('tagline').notNullable().defaultTo('');
+    t.text('description').notNullable().defaultTo('');
+    t.string('audience', 220).notNullable().defaultTo('');
+    t.text('colors').notNullable().defaultTo('[]');
+    t.text('logo_path');
+    t.text('product_image_path');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
+  provider_settings: (t) => {
+    t.string('id', 60).primary();
+    t.integer('enabled').notNullable().defaultTo(1);
+    t.string('updated_by', 48);
+    t.string('updated_at', 40).notNullable();
+  },
+  film_productions: (t) => {
+    t.string('id', 48).primary();
+    t.string('film_id', 48).notNullable().unique();
+    t.string('user_id', 48).notNullable().index();
+    t.text('brief').notNullable().defaultTo('');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.string('current_stage', 40).notNullable().defaultTo('analyze');
+    t.text('plan').notNullable().defaultTo('{}');
+    t.text('stages').notNullable().defaultTo('{}');
+    t.text('options').notNullable().defaultTo('{}');
+    t.integer('retries').notNullable().defaultTo(0);
+    t.text('error');
+    t.string('completed_at', 40);
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
   },
   film_episodes: (t) => {
     t.string('id', 48).primary();
@@ -512,6 +664,9 @@ export async function initializeDatabase(database, options = {}) {
   const filmColumns = {
     film_projects: {
       progress: (t) => t.integer('progress').notNullable().defaultTo(0),
+      poster_path: (t) => t.text('poster_path'),
+      brand_kit_id: (t) => t.string('brand_kit_id', 48),
+      ad_variants: (t) => t.text('ad_variants').notNullable().defaultTo('[]'),
       detail: (t) => t.text('detail'),
       reference_image_path: (t) => t.text('reference_image_path'),
       music_path: (t) => t.text('music_path'),
@@ -529,6 +684,37 @@ export async function initializeDatabase(database, options = {}) {
       sfx: (t) => t.text('sfx').notNullable().defaultTo('[]'),
       cancel_requested: (t) => t.integer('cancel_requested').notNullable().defaultTo(0),
       queued_at: (t) => t.string('queued_at', 40),
+      location_id: (t) => t.string('location_id', 48),
+      shot_size: (t) => t.string('shot_size', 60).notNullable().defaultTo(''),
+      camera_angle: (t) => t.string('camera_angle', 60).notNullable().defaultTo(''),
+      lens: (t) => t.string('lens', 40).notNullable().defaultTo(''),
+      lighting: (t) => t.string('lighting', 60).notNullable().defaultTo(''),
+      color_grade: (t) => t.string('color_grade', 60).notNullable().defaultTo(''),
+      composition: (t) => t.text('composition').notNullable().defaultTo(''),
+      storyboard_path: (t) => t.text('storyboard_path'),
+      storyboard_provider: (t) => t.string('storyboard_provider', 60),
+      storyboard_at: (t) => t.string('storyboard_at', 40),
+      voice_provider: (t) => t.string('voice_provider', 60),
+      voice_duration: (t) => t.decimal('voice_duration', 8, 2).notNullable().defaultTo(0),
+      voice_at: (t) => t.string('voice_at', 40),
+      trim_start: (t) => t.decimal('trim_start', 6, 2).notNullable().defaultTo(0),
+      trim_end: (t) => t.decimal('trim_end', 6, 2).notNullable().defaultTo(0),
+      transition: (t) => t.string('transition', 30).notNullable().defaultTo('cut'),
+      overlay_json: (t) => t.text('overlay_json'),
+      speed_factor: (t) => t.decimal('speed_factor', 5, 2).notNullable().defaultTo(1),
+      vfx_preset: (t) => t.string('vfx_preset', 40).notNullable().defaultTo('none'),
+      lipsync_provider: (t) => t.string('lipsync_provider', 60),
+      lipsync_at: (t) => t.string('lipsync_at', 40),
+    },
+    brand_kits: {
+      product_image_path: (t) => t.text('product_image_path'),
+    },
+    film_characters: {
+      wardrobe: (t) => t.text('wardrobe').notNullable().defaultTo(''),
+      expressions: (t) => t.text('expressions').notNullable().defaultTo('[]'),
+      relationships: (t) => t.text('relationships').notNullable().defaultTo('[]'),
+      age_range: (t) => t.string('age_range', 40).notNullable().defaultTo(''),
+      is_library: (t) => t.integer('is_library').notNullable().defaultTo(0),
     },
   };
   for (const [table, columns] of Object.entries(filmColumns)) {

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 160" width="720" height="160">
+  <defs><linearGradient id="badge" x1="4" y1="2" x2="60" y2="62" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#8b7cff"/><stop offset="1" stop-color="#5138d8"/>
+  </linearGradient>
+  <radialGradient id="sheen" cx="16" cy="10" r="36" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#ffffff" stop-opacity=".22"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+  </radialGradient></defs>
+  <g transform="translate(12 32)">
+    <rect width="96" height="96" rx="22.5" fill="url(#badge)"/>
+    <rect width="96" height="96" rx="22.5" fill="url(#sheen)"/>
+    <g transform="translate(0 0) scale(1.5)"><circle cx="32" cy="32" r="16.4" fill="none" stroke="#ffffff" stroke-width="3.6"/>
+  <path d="M40.10 32.00 L36.05 39.01 L27.95 39.01 L23.90 32.00 L27.95 24.99 L36.05 24.99 Z" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="3.5" fill="#42d9d0"/></g>
+  </g>
+  <text x="132" y="88" fill="#0b1020" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="46" font-weight="700" letter-spacing="-1.4">Film Club Lens</text>
+  <text x="134" y="119" fill="#6e6aff" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" letter-spacing="3.1">CREATE ONCE. PUBLISH EVERYWHERE.</text>
+</svg>

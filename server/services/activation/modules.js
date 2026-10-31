@@ -247,7 +247,7 @@ export const ACTIVATION_MODULES = [
     summary: 'Nodemailer transport that mirrors in-app notifications to email. Fully implemented; only the SMTP connection URL is missing. No provider approval needed.',
     env: [
       E('SMTP_URL', 'smtpUrl', { secret: true, label: 'SMTP connection URL', description: 'e.g. smtps://user:password@smtp.example.com:465. URL-encode special characters in the password.' }),
-      E('NOTIFICATION_FROM', 'optionalText', { label: 'From address', description: 'e.g. "Faceless Studio <notifications@example.com>".', optional: true }),
+      E('NOTIFICATION_FROM', 'optionalText', { label: 'From address', description: 'e.g. "Film Club Lens <notifications@example.com>".', optional: true }),
     ],
     consoleSteps: [
       step('Create an SMTP credential', 'Use your mail provider\'s app password / SMTP user. Avoid personal account passwords.'),
@@ -266,14 +266,14 @@ export const ACTIVATION_MODULES = [
     name: 'Signed notification webhooks',
     category: 'notifications',
     kind: 'config',
-    summary: 'Outbound notification events with HMAC-SHA256 X-Faceless-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.',
+    summary: 'Outbound notification events with HMAC-SHA256 X-Film-Club-Lens-Signature, 3-attempt retry with backoff, and timeout. Needs a receiver URL and a shared secret.',
     env: [
       E('NOTIFICATION_WEBHOOK_URL', 'webhookUrl', { label: 'Webhook receiver URL', description: 'Absolute HTTPS URL of your receiver (http allowed for local testing only).' }),
       E('NOTIFICATION_WEBHOOK_SECRET', 'webhookSecret', { secret: true, label: 'HMAC shared secret', description: 'At least 16 random characters; used to sign "timestamp.rawBody".' }),
     ],
     consoleSteps: [
       step('Generate a shared secret', 'e.g. openssl rand -hex 24. Store the same value in your receiver.'),
-      step('Verify the signature', 'Compute sha256 HMAC over "<x-faceless-timestamp>.<raw body>" and compare with a constant-time comparison against X-Faceless-Signature (sha256=…).'),
+      step('Verify the signature', 'Compute sha256 HMAC over "<x-film-club-lens-timestamp>.<raw body>" and compare with a constant-time comparison against X-Film-Club-Lens-Signature (sha256=…).'),
       step('Enforce a timestamp window', 'Reject events older than 5 minutes to prevent replay.'),
       step('Deduplicate by event id', 'Delivery retries (3 attempts) can repeat the same notification.'),
     ],
@@ -391,7 +391,7 @@ export const ACTIVATION_MODULES = [
     requiresHttps: true,
     callbacks: ['facebook', 'google', 'x', 'sandbox', 'stripeWebhook'],
     env: [
-      E('PUBLIC_BASE_URL', 'httpsOrigin', { label: 'Public HTTPS origin', description: 'Exact origin registered with every OAuth provider and Stripe, e.g. https://studio.example.com' }),
+      E('PUBLIC_BASE_URL', 'httpsOrigin', { label: 'Public HTTPS origin', description: 'Exact origin registered with every OAuth provider and Stripe, e.g. https://filmclublens.com' }),
       E('NODE_ENV', 'nonEmpty', { label: 'Node environment', description: 'Set to production for a real deployment.', defaultValue: 'production' }),
       E('SECURE_COOKIES', 'nonEmpty', { label: 'Secure cookies', description: 'Set to true when served over HTTPS.', defaultValue: 'true' }),
     ],
@@ -420,16 +420,19 @@ export const ACTIVATION_MODULES = [
     kind: 'hybrid',
     summary: 'Knex already supports PostgreSQL via DATABASE_URL, including schema creation, seeding, and conditional job claims verified with two real worker processes (pg-mem tests). Needs a real instance for multi-process production.',
     env: [
-      E('DATABASE_URL', 'postgresUrl', { label: 'PostgreSQL connection URL', description: 'postgresql://user:password@host:5432/faceless_studio — include the database name.' }),
+      E('DATABASE_URL', 'postgresUrl', { label: 'PostgreSQL connection URL', description: 'postgresql://user:password@host:5432/filmclublens?sslmode=require — include the database name.' }),
     ],
     deploySteps: [
-      step('Provision PostgreSQL', 'Use a managed instance with TLS. Create an empty database; the app creates and migrates tables on startup.'),
-      step('Use a least-privilege role', 'Grant only the application schema privileges needed by the app user.'),
-      step('Enable TLS', 'Append ?sslmode=require if your provider needs it, and confirm the driver accepts the certificate chain.'),
+      step('Create the database', 'Use a managed PostgreSQL with TLS — Neon, Supabase, Railway, RDS/Aurora, Cloud SQL, or your own server. Create an empty database (for example filmclublens); the app creates and migrates every table on first start. A free tier is sufficient to activate this module.'),
+      step('Copy the direct connection URL', 'Copy the direct/session string (port 5432), not a transaction pooler, for bootstrap and migrations. It must include the database name, and on managed providers append ?sslmode=require. Format: postgresql://USER:PASSWORD@HOST:5432/filmclublens?sslmode=require'),
+      step('Store it as a secret', 'Set DATABASE_URL in your deployment secret store, or in the host .env with mode 0600. It contains the database password — never commit it.'),
+      step('Prove the connection and schema', 'With DATABASE_URL set, run npm run db:bootstrap (or npm run activate -- postgres). It connects with the real pg driver, creates and verifies every table, and proves two concurrent workers cannot claim the same job.'),
+      step('Use a least-privilege role', 'Grant only the schema privileges the app needs and keep superuser out of the runtime role.'),
       step('Run multiple workers', 'Start one or more dedicated processes with WORKER_ENABLED=true and the same DATABASE_URL. Conditional job claims prevent duplicate work.'),
       step('Back up before migrating', 'SQLite data does not automatically transfer to PostgreSQL. Export/import deliberately if you have existing local data.'),
     ],
     verify: [
+      step('Run the bootstrap proof', 'DATABASE_URL=postgresql://… npm run db:bootstrap should report PASS for connection, schema, tables, two-worker claim and single execution. Then npm run activate -- postgres --verify-only re-checks the server version, TLS and schema readiness.'),
       step('Start two workers', 'Confirm both processes claim jobs without duplicates (see tests/postgres-multiprocess.test.js).'),
       step('Check doctor', 'npm run doctor should report "Production database" as PASS.'),
     ],

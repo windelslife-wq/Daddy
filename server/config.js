@@ -49,16 +49,16 @@ export const config = {
   publicDir: path.join(storageDir, 'public'),
   dbPath: path.resolve(root, env('SQLITE_PATH', 'data/app.sqlite3')),
   databaseUrl,
-  appName: env('APP_NAME', 'Faceless Studio'),
+  appName: env('APP_NAME', 'Film Club Lens'),
   appUrl: env('APP_URL', `http://localhost:${port}`),
   publicBaseUrl: env('PUBLIC_BASE_URL', env('APP_URL', `http://localhost:${port}`)).replace(/\/$/, ''),
   sessionTtlDays: envInt('SESSION_TTL_DAYS', 14),
   encryptionKeyMaterial,
   seedDemo: envBool('SEED_DEMO', !isProduction),
   skipFrontend: envBool('SKIP_FRONTEND', false),
-  demoEmail: env('DEMO_EMAIL', 'creator@faceless.local'),
+  demoEmail: env('DEMO_EMAIL', 'creator@filmclublens.local'),
   demoPassword: env('DEMO_PASSWORD', 'StudioDemo2026!'),
-  adminEmail: env('ADMIN_EMAIL', isProduction ? '' : 'admin@faceless.local'),
+  adminEmail: env('ADMIN_EMAIL', isProduction ? '' : 'admin@filmclublens.local'),
   adminPassword: env('ADMIN_PASSWORD', isProduction ? '' : 'AdminStudio2026!'),
   worker: {
     enabled: envBool('WORKER_ENABLED', true),
@@ -111,7 +111,7 @@ export const config = {
     webhookUrl: env('NOTIFICATION_WEBHOOK_URL'),
     webhookSecret: env('NOTIFICATION_WEBHOOK_SECRET'),
     webhookTimeoutMs: envInt('NOTIFICATION_WEBHOOK_TIMEOUT_MS', 10000),
-    from: env('NOTIFICATION_FROM', 'Faceless Studio <notifications@example.com>'),
+    from: env('NOTIFICATION_FROM', 'Film Club Lens <notifications@example.com>'),
   },
   // These are server-side endpoint roots. Defaults always target the official APIs.
   // Overrides are intended for isolated integration tests, approved API gateways,
@@ -145,11 +145,20 @@ export const config = {
     falModel: env('FILM_FAL_VIDEO_MODEL', 'fal-ai/kling-video/v2.1/master/image-to-video'),
     veoKey: env('GOOGLE_VEO_API_KEY') || env('GEMINI_API_KEY'),
     veoModel: env('FILM_VEO_MODEL', 'veo-3.0-generate-001'),
+    // Provider-gated post-production. Same credentials as the video providers;
+    // the model ids are deliberately NOT defaulted so we never invent one.
+    lipSyncProvider: env('FILM_LIPSYNC_PROVIDER', 'auto').toLowerCase(),
+    lipSyncReplicateModel: env('FILM_LIPSYNC_REPLICATE_MODEL') || null,
+    lipSyncFalModel: env('FILM_FAL_LIPSYNC_MODEL') || null,
+    motionProvider: env('FILM_MOTION_PROVIDER', 'auto').toLowerCase(),
+    motionReplicateModel: env('FILM_MOTION_REPLICATE_MODEL') || null,
+    motionFalModel: env('FILM_FAL_MOTION_MODEL') || null,
     // One clip = one provider prediction. Both the clip length ceiling and the
     // number of clips per film are configurable so long-form production can be
     // scaled without touching code.
     maxSceneSeconds: envInt('FILM_MAX_SCENE_SECONDS', 10),
     minSceneSeconds: envInt('FILM_MIN_SCENE_SECONDS', 4),
+    transitionFadeSeconds: Math.max(0.1, Math.min(2, Number(env('FILM_TRANSITION_FADE_SECONDS', '0.5')) || 0.5)),
     // 720 scenes × 10s covers a 60-minute film (360 clips) with headroom for a
     // 2-hour cut. Raise together with FILM_MAX_PROJECT_SECONDS for longer films.
     maxScenes: envInt('FILM_MAX_SCENES', 720),
@@ -179,35 +188,48 @@ export const config = {
     grantByPlan: { free: 60, starter: 300, creator: 900, scale: 3000 },
   },
   apiRateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MINUTE', 600),
+  // Public developer API (/api/v1). Keys are created in the app, never in env.
+  api: {
+    keyRateLimitPerMinute: envInt('API_KEY_RATE_LIMIT_PER_MINUTE', 120),
+  },
+  version: env('APP_VERSION', '1.0.0'),
   security: {
     trustProxy: envBool('TRUST_PROXY', true),
     secureCookies: envBool('SECURE_COOKIES', isProduction && env('PUBLIC_BASE_URL').startsWith('https://')),
   },
 };
 
-const configured = {
-  local: true,
-  procedural: true,
-  mespeak: true,
-  ffmpeg: true,
-  openai: Boolean(config.ai.openaiKey),
-  anthropic: Boolean(config.ai.anthropicKey),
-  gemini: Boolean(config.ai.geminiKey),
-  brave: Boolean(config.ai.researchApiKey),
-  tavily: Boolean(config.ai.researchApiKey),
-  openaiImages: Boolean(config.ai.openaiKey),
-  replicate: Boolean(config.media.replicateToken),
-  elevenlabs: Boolean(config.media.elevenLabsKey),
-  facebook: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
-  instagram: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
-  youtube: Boolean(config.oauth.googleClientId && config.oauth.googleClientSecret),
-  x: Boolean(config.oauth.xConsumerKey && config.oauth.xConsumerSecret),
-  stripe: Boolean(config.stripe.secret),
-  smtp: Boolean(config.notifications.smtpUrl),
-  publicMedia: config.publicBaseUrl.startsWith('https://'),
-};
+/**
+ * Credential presence is derived from the live config object on every call, not
+ * captured once at import: the Super Admin dashboard can change a provider key at
+ * runtime (see server/providerConfig.js) and status must follow immediately.
+ */
+function configuredProviders() {
+  return {
+    local: true,
+    procedural: true,
+    mespeak: true,
+    ffmpeg: true,
+    openai: Boolean(config.ai.openaiKey),
+    anthropic: Boolean(config.ai.anthropicKey),
+    gemini: Boolean(config.ai.geminiKey),
+    brave: Boolean(config.ai.researchApiKey),
+    tavily: Boolean(config.ai.researchApiKey),
+    openaiImages: Boolean(config.ai.openaiKey),
+    replicate: Boolean(config.media.replicateToken),
+    elevenlabs: Boolean(config.media.elevenLabsKey),
+    facebook: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+    instagram: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+    youtube: Boolean(config.oauth.googleClientId && config.oauth.googleClientSecret),
+    x: Boolean(config.oauth.xConsumerKey && config.oauth.xConsumerSecret),
+    stripe: Boolean(config.stripe.secret),
+    smtp: Boolean(config.notifications.smtpUrl),
+    publicMedia: config.publicBaseUrl.startsWith('https://'),
+  };
+}
 
 export function providerStatus() {
+  const configured = configuredProviders();
   const p = config.ai.provider;
   return {
     appName: config.appName,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { BarChart3, ExternalLink, FlaskConical, Sparkles } from 'lucide-react';
+import { BarChart3, ExternalLink, FlaskConical } from 'lucide-react';
+import { BrandMark } from '../components/BrandMark.jsx';
 import { useLoad } from '../hooks.js';
 import { get, formatDate, formatNumber } from '../api.js';
 import { Button, Card, ErrorBanner, KeyValue, Spinner, StatusBadge } from '../components/ui.jsx';
@@ -14,7 +15,7 @@ export default function SandboxPost() {
     <div className="public-page">
       <Card className="public-card">
         <div className="row-between" style={{ marginBottom: 18 }}>
-          <div className="row"><div className="brand-mark"><Sparkles size={20} /></div><div><strong>Sandbox post</strong><small style={{ display: 'block' }}>Local HTTP publisher</small></div></div>
+          <div className="row"><div className="brand-mark"><BrandMark size={38} /></div><div><strong>Sandbox post</strong><small style={{ display: 'block' }}>Local HTTP publisher</small></div></div>
           <StatusBadge status="needs_review" label="Simulated" />
         </div>
         <ErrorBanner error={token ? error : new Error('Missing view token. Open the link from the publishing history instead.')} onRetry={token ? () => reload().catch(() => {}) : undefined} />

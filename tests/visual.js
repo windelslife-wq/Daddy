@@ -82,9 +82,9 @@ before(async () => {
     SKIP_FRONTEND: 'false',
     SEED_DEMO: 'true',
     EXPOSE_DEMO_CREDENTIALS: 'true',
-    ADMIN_EMAIL: '',
-    ADMIN_PASSWORD: '',
-    DEMO_EMAIL: 'visual@faceless.local',
+    ADMIN_EMAIL: 'visual-admin@filmclublens.local',
+    ADMIN_PASSWORD: 'VisualAdmin2026!',
+    DEMO_EMAIL: 'visual@filmclublens.local',
     DEMO_PASSWORD: 'VisualQA2026!',
     PORT: String(port),
     HOST: '127.0.0.1',
@@ -167,10 +167,51 @@ test('professional global website, themes, authentication, workspace, and respon
     assert.ok(await page.locator('.site-footer .footer-column a').count() >= PUBLIC_PAGES.length - 1);
   });
 
+  await t.test('brand favicon, app icons and press kit load from the built site', async () => {
+    const response = await page.goto(base, { waitUntil: 'networkidle' });
+    assert.equal(response.status(), 200);
+    const head = await page.evaluate(() => ({
+      icons: [...document.querySelectorAll('link[rel~="icon"]')].map((link) => ({
+        href: link.getAttribute('href'),
+        type: link.getAttribute('type') || '',
+        sizes: link.getAttribute('sizes') || '',
+      })),
+      apple: document.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href'),
+      og: document.querySelector('meta[property="og:image"]')?.getAttribute('content'),
+      dataUri: [...document.querySelectorAll('link[rel~="icon"]')].some((link) => (link.getAttribute('href') || '').startsWith('data:')),
+    }));
+    assert.equal(head.dataUri, false, 'the favicon must be a real file, not a data URI');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon.svg' && icon.type === 'image/svg+xml'), 'SVG favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon-32.png' && icon.sizes === '32x32'), '32 px favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon-16.png' && icon.sizes === '16x16'), '16 px favicon link missing');
+    assert.ok(head.icons.some((icon) => icon.href === '/favicon.ico'), 'ICO fallback missing');
+    assert.equal(head.apple, '/apple-touch-icon.png');
+    assert.match(head.og, /^https:\/\/filmclublens\.com\/brand\/og-image\.png$/, 'social card meta missing');
+
+    for (const asset of ['/favicon.svg', '/favicon.ico', '/favicon-16.png', '/favicon-32.png',
+      '/apple-touch-icon.png', '/icons/icon-192.png', '/icons/icon-maskable-512.png', '/brand/logo-lockup.svg']) {
+      const assetResponse = await page.request.get(base + asset);
+      assert.equal(assetResponse.status(), 200, `${asset} should be served`);
+    }
+    const faviconSvg = await (await page.request.get(base + '/favicon.svg')).text();
+    assert.match(faviconSvg, /#42d9d0/, 'favicon should carry the brand cyan');
+
+    await page.goto(`${base}/press`, { waitUntil: 'networkidle' });
+    const grid = page.locator('.brand-kit-grid');
+    await grid.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('.brand-kit-grid img')].every((img) => img.complete && img.naturalWidth > 0), null, { timeout: 10000 });
+    const cards = await grid.locator('.brand-kit-card').count();
+    assert.equal(cards, 4, 'press page should offer four brand downloads');
+    const downloads = await grid.locator('a[download]').evaluateAll((links) => links.map((link) => link.getAttribute('href')).sort());
+    assert.deepEqual(downloads, ['/brand/logo-lockup-inverse.svg', '/brand/logo-mark-1024.png', '/brand/logo-mark.svg', '/brand/og-image.png']);
+    await assertNoHorizontalOverflow('press brand kit');
+    await screenshot('press-brand-kit.png');
+  });
+
   await t.test('contact form submits through the real backend endpoint', async () => {
     await page.goto(`${base}/contact`, { waitUntil: 'networkidle' });
     await page.getByLabel('Your name').fill('Visual QA');
-    await page.getByLabel('Email address').fill('visual-qa@faceless.local');
+    await page.getByLabel('Email address').fill('visual-qa@filmclublens.local');
     await page.getByLabel('What is this about?').selectOption('support');
     await page.getByLabel('Message').fill('Please verify that the public contact form stores a real message and returns a reference.');
     await page.getByRole('button', { name: /Send message/i }).click();
@@ -224,10 +265,30 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 
+  await t.test('the developer API reference renders the live catalogue', async () => {
+    await page.goto(base + '/developers', { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+    await page.locator('details.api-endpoint').first().waitFor({ timeout: 15000 });
+    const endpointCount = await page.locator('details.api-endpoint').count();
+    assert.ok(endpointCount >= 14, `expected the live API catalogue, rendered ${endpointCount} endpoints`);
+    const methods = await page.locator('details.api-endpoint > summary .api-method').allTextContents();
+    assert.ok(methods.includes('POST') && methods.includes('GET'), 'documented methods are rendered');
+    await page.locator('details.api-endpoint').first().locator('summary').click();
+    assert.equal(await page.locator('details.api-endpoint').first().evaluate((el) => el.open), true, 'endpoint details expand');
+    assert.ok((await page.locator('.api-docs-main .code-shell').count()) >= 20, 'request and response samples render');
+    await screenshot('api-docs-desktop.png');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(base + '/developers', { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+    await assertNoHorizontalOverflow('mobile /developers');
+    await screenshot('api-docs-mobile.png', 390);
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
+
   await t.test('signup creates a real account and reaches the workspace', async () => {
     await page.goto(`${base}/signup`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: /Create your workspace/i }).waitFor();
-    const email = `visual-signup-${Date.now()}@faceless.local`;
+    const email = `visual-signup-${Date.now()}@filmclublens.local`;
     await page.getByLabel('Full name').fill('Visual QA User');
     await page.getByLabel('Email address').fill(email);
     await page.getByLabel('Create password', { exact: true }).fill('StudioSignup2026!');
@@ -282,9 +343,194 @@ test('professional global website, themes, authentication, workspace, and respon
     await page.getByRole('menuitemradio', { name: /Midnight/i }).click();
   });
 
+  await t.test('film studio locations, shot direction and QC screens work end to end', async () => {
+    // Create a real project through the same API the UI uses, then drive the UI.
+    const project = await page.evaluate(async () => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          type: 'cinematic_scene', title: 'Visual director test', genre: 'family_drama',
+          style: 'cinematic', aspectRatio: '16:9', targetPlatform: 'youtube', targetDurationSeconds: 60,
+        }),
+      })).json();
+      await fetch(`/api/films/${created.film.id}/screenplay`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ idea: 'A city wakes up at dawn and a family makes a choice', allowTemplate: true }),
+      });
+      return created.film;
+    });
+    assert.ok(project?.id, 'project must be created through the API');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=locations`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Production locations/i }).waitFor({ timeout: 15000 });
+    await page.locator('input[placeholder="Amara\'s apartment"]').fill('Rooftop at dawn');
+    await page.locator('textarea[placeholder^="Small Lagos apartment"]').fill('Concrete rooftop, water tanks, skyline haze');
+    await page.getByRole('button', { name: /Save location/i }).click();
+    await page.getByText('Rooftop at dawn').first().waitFor({ timeout: 15000 });
+    await screenshot('film-locations-desktop.png');
+    await assertNoHorizontalOverflow('film locations');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=scenes`, { waitUntil: 'networkidle' });
+    await page.getByText(/Storyboard/i).first().waitFor({ timeout: 15000 });
+    await page.getByText('Shot size').first().waitFor();
+    await page.getByText('Camera angle').first().waitFor();
+    await page.getByText('Colour grade').first().waitFor();
+    assert.ok(await page.locator('.film-scene-card').count() > 0, 'scenes must render');
+    await screenshot('film-director-desktop.png');
+
+    await page.goto(`${base}/app/films/project/${project.id}?step=render`, { waitUntil: 'networkidle' });
+    await page.getByText(/Quality control/i).first().waitFor({ timeout: 15000 });
+    await page.getByText(/Every scene has a real generated clip/i).first().waitFor();
+    await screenshot('film-qc-desktop.png');
+
+    // The same three screens must fit a phone viewport without horizontal scrolling.
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const step of ['locations', 'scenes', 'render']) {
+      await page.goto(`${base}/app/films/project/${project.id}?step=${step}`, { waitUntil: 'networkidle' });
+      await page.locator('.film-steps').waitFor({ timeout: 15000 });
+      await assertNoHorizontalOverflow(`mobile film ${step}`);
+    }
+  });
+
+  await t.test('the production agent writes a real screenplay then stops at the paid gate', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${base}/app/films/agent`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /AI Production Agent/i }).waitFor({ timeout: 15000 });
+    await page.locator('textarea[placeholder^="A 20-minute Nigerian family drama"]').fill(
+      'A 2-minute Nigerian family drama with three main characters, set in a warm Abuja apartment and a rooftop at dusk.',
+    );
+    await page.getByRole('button', { name: /Start production/i }).click();
+    await page.waitForURL(/\/app\/films\/agent\?film=/, { timeout: 30000 });
+    await page.getByText('Generate scene clips').first().waitFor({ timeout: 20000 });
+
+    // The free stages really ran: the screenplay, cast, locations and direction exist.
+    for (const label of ['Understand the brief', 'Write the screenplay', 'Cast the characters', 'Build the locations', 'Direct every shot']) {
+      await page.getByText(new RegExp(label, 'i')).first().waitFor();
+    }
+    const approve = page.getByRole('button', { name: /Approve scene generation/i });
+    await approve.waitFor({ timeout: 15000 });
+    await screenshot('film-agent-desktop.png');
+    assert.ok(!(await page.getByText(/Preview & export/i).count()), 'a production without clips must not offer export');
+    await assertNoHorizontalOverflow('film agent desktop');
+
+    // Approving with no provider configured must fail honestly and stay blocked.
+    await approve.click();
+    await page.getByText(/Real AI video generation is not configured/i).first().waitFor({ timeout: 20000 });
+    await page.getByText(/blocked at this stage/i).first().waitFor();
+    assert.ok(!(await page.getByText(/Preview & export/i).count()), 'a blocked production never claims completion');
+    await screenshot('film-agent-blocked-desktop.png');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText(/Generate scene clips/i).first().waitFor({ timeout: 15000 });
+    await assertNoHorizontalOverflow('mobile film agent');
+  });
+
+  await t.test('storyboard, voice, timeline, canvas and model pages work end to end', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const project = await page.evaluate(async () => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          type: 'short_drama', title: 'Visual panels test', genre: 'family_drama',
+          style: 'cinematic', aspectRatio: '9:16', targetPlatform: 'tiktok', targetDurationSeconds: 30,
+        }),
+      })).json();
+      await fetch(`/api/films/${created.film.id}/screenplay`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ idea: 'A sister finds a letter on a rooftop at dawn', allowTemplate: true }),
+      });
+      return created.film;
+    });
+    assert.ok(project?.id, 'project must be created through the API');
+
+    // 5. Storyboard — procedural stills are rendered and displayed.
+    await page.goto(`${base}/app/films/project/${project.id}?step=storyboard`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Render missing stills/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Render missing stills/i }).click();
+    await page.locator('.film-storyboard-card img').first().waitFor({ timeout: 45000 });
+    assert.ok(await page.locator('.film-storyboard-card').count() > 0, 'storyboard cards must render');
+    await screenshot('film-storyboard-desktop.png');
+    await assertNoHorizontalOverflow('film storyboard');
+
+    // 7. Voice — real local takes appear as playable audio.
+    await page.goto(`${base}/app/films/project/${project.id}?step=voice`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Record missing takes/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Record missing takes/i }).click();
+    await page.locator('audio').first().waitFor({ timeout: 45000 });
+    assert.ok(await page.locator('audio').count() > 0, 'voice takes must be playable');
+    await screenshot('film-voice-desktop.png');
+
+    // 8. Timeline — a transition is applied and persisted.
+    await page.goto(`${base}/app/films/project/${project.id}?step=timeline`, { waitUntil: 'networkidle' });
+    await page.locator('.film-timeline-controls select').first().waitFor({ timeout: 15000 });
+    await page.locator('.film-timeline-controls select').first().selectOption('fade_black');
+    await page.getByRole('button', { name: /^Apply$/ }).first().click();
+    await page.getByText(/applied to the next render/i).first().waitFor({ timeout: 15000 });
+
+    // Multi-track: expand the track editor, choose a look and apply it.
+    await page.locator('.film-track-editor > summary').first().click();
+    await page.locator('.film-track-editor select').first().selectOption('vignette');
+    await page.locator('.film-track-editor input[type="number"]').first().fill('0.5');
+    await page.locator('.film-track-editor').first().getByRole('button', { name: /Apply track/i }).click();
+    await page.getByText(/speed, look and overlay saved/i).first().waitFor({ timeout: 15000 });
+    await screenshot('film-timeline-desktop.png');
+
+    // 4. Creative canvas — a real flow executes through the UI.
+    const flow = await page.evaluate(async (filmId) => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films/flows', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          name: 'Visual canvas', filmId,
+          graph: {
+            nodes: [
+              { id: 'brief', type: 'text', config: { text: 'A rooftop at dawn, a sister holding a letter.' } },
+              { id: 'frame', type: 'image', config: { aspectRatio: '9:16' } },
+              { id: 'line', type: 'voice', config: { voice: 'nova' } },
+            ],
+            edges: [{ from: 'brief', to: 'frame' }, { from: 'frame', to: 'line' }],
+          },
+        }),
+      })).json();
+      return created.flow;
+    }, project.id);
+    assert.ok(flow?.id, 'flow must be created through the API');
+    await page.goto(`${base}/app/films/canvas?flow=${flow.id}`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Run flow/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Run flow/i }).click();
+    await page.locator('.film-flow-result.done').first().waitFor({ timeout: 45000 });
+    await page.locator('.film-flow-node img').first().waitFor({ timeout: 15000 });
+    await page.locator('.film-flow-node audio').first().waitFor({ timeout: 15000 });
+    await screenshot('film-canvas-desktop.png');
+
+    // 12. Model registry — readiness comes from the server, no fake activation.
+    await page.goto(`${base}/app/films/models`, { waitUntil: 'networkidle' });
+    await page.getByText(/Needs a video key/i).first().waitFor({ timeout: 15000 });
+    await page.getByText(/Local stills/i).first().waitFor();
+    await page.getByText(/meSpeak \(local\)/i).first().waitFor();
+    await screenshot('film-models-desktop.png');
+
+    // 8. Ad Studio — brand kit form and campaign picker are real controls.
+    await page.goto(`${base}/app/films/ads`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: /Ad & Marketing Studio/i }).waitFor({ timeout: 15000 });
+    await page.getByText(/New brand kit/i).first().waitFor();
+    await page.getByRole('button', { name: /Save brand kit/i }).waitFor();
+    await screenshot('film-ads-desktop.png');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const route of [`/app/films/project/${project.id}?step=storyboard`, `/app/films/project/${project.id}?step=voice`, `/app/films/project/${project.id}?step=timeline`, '/app/films/models', '/app/films/ads']) {
+      await page.goto(base + route, { waitUntil: 'networkidle' });
+      await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+      await assertNoHorizontalOverflow(`mobile ${route}`);
+    }
+  });
+
   await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {
+    for (const route of ['/', '/login', '/signup', '/pricing', '/developers', '/app']) {
       await page.goto(base + route, { waitUntil: 'networkidle' });
       await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 8000 });
       await assertNoHorizontalOverflow(`mobile ${route}`);
@@ -302,13 +548,69 @@ test('professional global website, themes, authentication, workspace, and respon
     await screenshot('dashboard-mobile.png', 390);
   });
 
+  await t.test('the Super Admin dashboard owns provider configuration', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Creators must see no provider configuration at all.
+    await page.goto(`${base}/app/settings`, { waitUntil: 'networkidle' });
+    assert.doesNotMatch(await page.locator('.tabs').innerText(), /AI providers/i, 'creator Settings still lists providers');
+    assert.doesNotMatch(await page.locator('body').innerText(), /Provider status/i, 'creator Settings still renders provider status');
+
+    await context.clearCookies();
+    await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+    await page.locator('input[type="email"]').fill(env.ADMIN_EMAIL);
+    await page.locator('input[type="password"]').fill(env.ADMIN_PASSWORD);
+    await page.getByRole('button', { name: /^Sign in$/ }).click();
+    await page.waitForURL('**/app', { timeout: 15000 });
+
+    await page.goto(`${base}/app/admin`, { waitUntil: 'networkidle' });
+    await page.locator('.admin-side button', { hasText: 'Providers' }).click();
+    await page.getByText(/Active providers/i).waitFor({ timeout: 15000 });
+    assert.equal(await page.locator('.provider-choice').count(), 5, 'every modality is configurable');
+    assert.equal(await page.locator('.provider-secret').count(), 8, 'every credential is listed');
+    assert.equal(await page.locator('.provider-models .field').count(), 10, 'model overrides are available');
+
+    // Selecting a provider whose credential does not exist must fail honestly.
+    await page.locator('.provider-choice').first().locator('select').selectOption('openai');
+    await page.locator('button', { hasText: 'Save changes' }).first().click();
+    await page.getByText(/cannot use OpenAI yet/i).waitFor({ timeout: 15000 });
+    assert.equal(await page.locator('.provider-choice').first().locator('select').inputValue(), 'openai');
+
+    // Nothing was persisted by the rejected save.
+    const status = await page.request.get(`${base}/api/meta/status`);
+    assert.equal((await status.json()).ai.active, 'local');
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('.admin-side button', { hasText: 'Providers' }).click();
+    await page.getByText(/Active providers/i).waitFor();
+    await assertNoHorizontalOverflow('admin providers');
+    await screenshot('admin-providers.png');
+  });
+
   await t.test('browser reports no uncaught page errors or unexpected failed requests', async () => {
     assert.deepEqual(pageErrors, []);
-    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
+    const expectedConsole = [
+      ...(httpErrors.some((line) => /^503 .*\/production\/advance$/.test(line))
+        ? [/Failed to load resource: the server responded with a status of 503/i]
+        : []),
+      // The provider-configuration test deliberately asks for a provider with no
+      // credential and expects the documented 400 rejection.
+      ...(httpErrors.some((line) => /^400 .*\/api\/admin\/providers$/.test(line))
+        ? [/Failed to load resource: the server responded with a status of 400/i]
+        : []),
+    ];
+    const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message)
+      && !expectedConsole.some((pattern) => pattern.test(message)));
     assert.deepEqual(unexpectedConsoleErrors, [], `Unexpected console errors. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
     const unexpectedFailedRequests = failedRequests.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message));
     assert.deepEqual(unexpectedFailedRequests, [], `Unexpected failed requests. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
-    assert.deepEqual(httpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
+    // The production-agent test deliberately approves generation without a provider:
+    // the server rejects that with a documented 503 instead of fabricating a clip.
+    const honestRejections = [
+      /^503 .*\/production\/advance$/,
+      /^400 .*\/api\/admin\/providers$/,
+    ];
+    const unexpectedHttpErrors = httpErrors.filter((line) => !honestRejections.some((pattern) => pattern.test(line)));
+    assert.deepEqual(unexpectedHttpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
     console.log(JSON.stringify({
       visualQa: 'passed',
       publicPages: PUBLIC_PAGES.length,

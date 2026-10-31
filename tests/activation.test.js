@@ -32,7 +32,7 @@ function fullEnv(overrides = {}) {
     X_CONSUMER_SECRET: 'xconsumersecret12345',
     STRIPE_SECRET_KEY: 'sk_test_abcdef123456',
     STRIPE_WEBHOOK_SECRET: 'whsec_abcdef123456',
-    PUBLIC_BASE_URL: 'https://studio.example.com',
+    PUBLIC_BASE_URL: 'https://filmclublens.com',
     NODE_ENV: 'production',
     SECURE_COOKIES: 'true',
     SEED_DEMO: 'false',
@@ -80,12 +80,12 @@ test('registry is complete, internally consistent, and ordered 1..15', () => {
 });
 
 test('callback URLs are exact and derive from the configured origin', () => {
-  const urls = callbackUrlsFor('https://studio.example.com/');
-  assert.equal(urls.facebook, 'https://studio.example.com/api/oauth/facebook/callback');
-  assert.equal(urls.google, 'https://studio.example.com/api/oauth/google/callback');
-  assert.equal(urls.x, 'https://studio.example.com/api/oauth/x/callback');
-  assert.equal(urls.sandbox, 'https://studio.example.com/api/oauth/sandbox/callback');
-  assert.equal(urls.stripeWebhook, 'https://studio.example.com/api/billing/webhook');
+  const urls = callbackUrlsFor('https://filmclublens.com/');
+  assert.equal(urls.facebook, 'https://filmclublens.com/api/oauth/facebook/callback');
+  assert.equal(urls.google, 'https://filmclublens.com/api/oauth/google/callback');
+  assert.equal(urls.x, 'https://filmclublens.com/api/oauth/x/callback');
+  assert.equal(urls.sandbox, 'https://filmclublens.com/api/oauth/sandbox/callback');
+  assert.equal(urls.stripeWebhook, 'https://filmclublens.com/api/billing/webhook');
 });
 
 test('validators accept real-looking values and reject placeholders', () => {
@@ -124,7 +124,7 @@ test('generated encryption key is valid base64 encoding exactly 32 bytes', () =>
 
 test('mergeEnv preserves comments, replaces in place, revives templates, and never duplicates keys', () => {
   const original = [
-    '# Faceless Studio — server environment',
+    '# Film Club Lens — server environment',
     'NODE_ENV=development',
     '',
     '# META_APP_ID=',
@@ -137,13 +137,13 @@ test('mergeEnv preserves comments, replaces in place, revives templates, and nev
     OPENAI_API_KEY: 'sk-abcdefghijklmnopqrstuvwxyz',
     STRIPE_SECRET_KEY: 'sk_test_newvalue',
   });
-  assert.ok(merged.includes('# Faceless Studio — server environment'));
+  assert.ok(merged.includes('# Film Club Lens — server environment'));
   assert.ok(merged.includes('# trailing comment'));
   assert.equal((merged.match(/^NODE_ENV=/gm) || []).length, 1);
   assert.equal((merged.match(/^META_APP_ID=/gm) || []).length, 1);
   assert.equal((merged.match(/^OPENAI_API_KEY=/gm) || []).length, 1);
   assert.ok(merged.includes('STRIPE_SECRET_KEY='));
-  assert.ok(merged.includes('Added by the Faceless Studio setup wizard'));
+  assert.ok(merged.includes('Added by the Film Club Lens setup wizard'));
 
   const parsed = parseEnv(merged);
   assert.equal(parsed.NODE_ENV, 'production');
@@ -160,7 +160,7 @@ test('formatValue round-trips realistic values through dotenv v17', () => {
   const values = [
     'sk_test_abcdef123456',
     'a"b\\c',
-    'Faceless Studio <notifications@example.com>',
+    'Film Club Lens <notifications@example.com>',
     'sk-test#with-hash',
     'line1\nline2',
     'postgresql://user:p%40ss@db.example.com:5432/faceless',

@@ -13,12 +13,12 @@ export function notificationWebhookHeaders(raw, options = {}) {
   const timestamp = options.timestamp || Math.floor(Date.now() / 1000);
   const headers = {
     'content-type': 'application/json',
-    'x-faceless-event': 'notification.created',
-    'x-faceless-timestamp': String(timestamp),
+    'x-film-club-lens-event': 'notification.created',
+    'x-film-club-lens-timestamp': String(timestamp),
     'user-agent': `${config.appName.replace(/[^a-z0-9-]/gi, '-')}-webhook/1.0`,
   };
   const signature = signNotificationPayload(raw, { ...options, timestamp });
-  if (signature) headers['x-faceless-signature'] = signature;
+  if (signature) headers['x-film-club-lens-signature'] = signature;
   return headers;
 }
 

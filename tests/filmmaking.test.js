@@ -117,11 +117,11 @@ before(async () => {
   await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
   const login = await request('/api/auth/login', {
-    method: 'POST', body: { email: 'creator@faceless.local', password: 'StudioDemo2026!' },
+    method: 'POST', body: { email: 'creator@filmclublens.local', password: 'StudioDemo2026!' },
   });
   assert.equal(login.status, 200, `demo login failed: ${JSON.stringify(login.data)}`);
   cookie = (login.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
-  const user = await db('users').where({ email: 'creator@faceless.local' }).first();
+  const user = await db('users').where({ email: 'creator@filmclublens.local' }).first();
   userId = user.id;
 });
 
@@ -368,6 +368,23 @@ test('assembly refuses to fabricate missing clips', async () => {
   assert.ok(res.data.error.details.missing.length >= 1);
   const detail = await req(`/api/films/${id}`);
   assert.equal(detail.data.hasVideo, false, 'no fake final video may be created');
+});
+
+test('editorial trims and fades are accepted and survive into the renderer', async () => {
+  const detail = await req(`/api/films/${filmId}`);
+  const [first, second] = detail.data.scenes;
+  const faded = await req(`/api/films/${filmId}/scenes/${first.id}`, {
+    method: 'PATCH', body: { transition: 'fade_black', trim_start: 0.2 },
+  });
+  assert.equal(faded.status, 200, JSON.stringify(faded.data));
+  assert.equal(faded.data.scene.transition, 'fade_black');
+  const dipped = await req(`/api/films/${filmId}/scenes/${second.id}`, {
+    method: 'PATCH', body: { transition: 'dip_white', trim_end: 0.1 },
+  });
+  assert.equal(dipped.status, 200, JSON.stringify(dipped.data));
+  const again = await req(`/api/films/${filmId}`);
+  assert.equal(again.data.scenes[0].transition, 'fade_black');
+  assert.equal(again.data.scenes[1].trimEnd, 0.1);
 });
 
 test('a completed scene-by-scene film assembles into a playable MP4 with subtitles', async () => {

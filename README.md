@@ -1,4 +1,6 @@
-# Faceless Studio
+# Film Club Lens
+
+**Website:** https://filmclublens.com
 
 A full-stack, production-oriented AI **filmmaking and social media automation** platform. It creates short dramas, long dramas, episodic series and movies scene by scene with real AI video providers, assembles them into playable MP4 films with voices, subtitles and music, and also supports the original faceless-video workflow: scripts, original visuals, narration, rendering, scheduling and official social publishing.
 
@@ -34,6 +36,9 @@ This is **not a clickable UI demo**. The local preview works end to end without 
 - **Four formats in one ecosystem:** Short Drama, Long Drama & Movie Studio, Series & Episodes, plus standalone AI Script Writer, Character Studio, Scene Generator, Voice & Audio Studio, Movie Editor, My Projects, My Media, Published Movies and Credits & Subscriptions.
 - **Workflow:** idea or reference image → format → genre/language/duration/style/platform → screenplay & dialogue → characters with visual references → real AI scene clips → voices/SFX/music/subtitles → scene arrangement & editing → preview → export/download/save/publish. Every step persists, so you can resume a saved project at any time.
 - **Long-form is scene-by-scene.** AI video models produce short clips (default 10s max). A 1–60 minute film is planned as `ceil(duration / clip length)` scenes — 360 clips for a 60-minute cut — and assembled from those real clips into one MP4. Scene count and clip length are configurable (`FILM_MAX_SCENES`, `FILM_MAX_SCENE_SECONDS`), and an over-limit request fails with exact numbers instead of being silently shortened. No request pretends to generate a feature-length film in one call.
+- **Describe it once, then approve the spend.** The **AI Production Agent** (`/app/films/agent`) parses a written brief, writes the screenplay, casts the characters, saves the locations and directs every shot for free, then stops and asks before scene generation or assembly. It only reports a production as complete when a real rendered MP4 exists; a missing provider is reported as a blocked run with the exact failing scene numbers, never as fake footage.
+- **Storyboard, voices and edits before you spend on video.** Ten production steps now include storyboard stills (real PNGs, procedural offline or model-drawn), per-scene voice takes with measured duration, and a timeline with trims and fades that FFmpeg applies at render time. A **Creative Canvas** chains text → screenplay → stills → voice → credit-metered scene clips, and **Models & Providers** shows live readiness and prices for every provider — with no fake activation switches.
+- **Direct every shot, not just the scene.** Shot size, camera angle, lens, camera movement, lighting, colour grade and composition are closed vocabularies validated by the API and translated into the real provider prompt. A reusable **locations library** keeps production design identical across scenes and episodes, and `GET /api/films/:id/qc` audits clips, cast references, shot direction, location links, runtime, TTS readiness and render status before export. See [docs/FILM-STUDIO-AUDIT.md](docs/FILM-STUDIO-AUDIT.md).
 - **Review and regenerate only the scenes you dislike.** Failed jobs, provider errors, progress and remaining credits are always visible. Credits are estimated before expensive work, reserved before a job, and refunded automatically on failure or cancellation. A whole production run can be paused, resumed or cancelled; the canvas supports 16:9, 9:16 and 1:1.
 - **Crash-safe runs.** Generation state lives in the database, so a worker that dies mid-run resumes the same provider predictions on restart (measured 509 ms after `SIGKILL`). Credits are reserved per attempt and refunded exactly once — never twice.
 - **Verify a live provider in one command.** `npm run verify:provider -- --provider=replicate` generates, downloads and FFmpeg-probes one real clip with your key. What is and is not production-verified is recorded in **[docs/PRODUCTION-ACCEPTANCE.md](docs/PRODUCTION-ACCEPTANCE.md)**.
@@ -90,8 +95,8 @@ Open `http://localhost:8787`.
 Preview credentials seeded in development:
 
 ```text
-Creator: creator@faceless.local / StudioDemo2026!
-Admin:   admin@faceless.local   / AdminStudio2026!
+Creator: creator@filmclublens.local / StudioDemo2026!
+Admin:   admin@filmclublens.local   / AdminStudio2026!
 ```
 
 > Change or disable seeded accounts before exposing a deployment. Set `SEED_DEMO=false` and provide `ADMIN_EMAIL` / `ADMIN_PASSWORD` deliberately.
@@ -104,6 +109,58 @@ npm start
 ```
 
 For a multi-process deployment, run one or more dedicated workers with the same database and `WORKER_ENABLED=true`; use PostgreSQL via `DATABASE_URL`.
+
+### Previewing behind an HTTPS tunnel or sandbox URL
+
+The dev server (`npm run dev`) serves the frontend through Vite middleware and keeps hot
+reloading on a websocket. Many tunnels and sandbox previews do not forward that websocket,
+which leaves the browser retrying a socket it can never reach. Two supported ways to preview:
+
+```bash
+# Recommended for previews: serve the built bundle (no HMR websocket at all)
+npm start            # = vite build + NODE_ENV=production node server/index.js
+
+# Or keep dev mode and point HMR at the tunnel
+HMR_CLIENT_PORT=443 HMR_PROTOCOL=wss npm run dev
+HMR=off npm run dev  # dev mode with hot reload disabled entirely
+```
+
+Set `PUBLIC_BASE_URL` (and `APP_URL`) to the tunnel origin so cookies, OAuth redirects and
+absolute media URLs use the host the browser actually visits.
+
+---
+
+## Developer API
+
+A versioned REST API (`/api/v1`) lets your own systems drive the platform. Keys are created
+in **Workspace → Developer API**, scoped (`read` / `write` / `publish`), and stored only as
+SHA-256 hashes; revocation is immediate.
+
+| Resource | Where |
+|---|---|
+| Interactive reference (public) | `/developers` — rendered from the live catalogue |
+| Machine-readable spec | `GET /api/developer/spec` |
+| OpenAPI 3.1 document | `GET /api/developer/openapi.json` |
+| Key management | `GET/POST /api/developer/keys`, `DELETE /api/developer/keys/:id` |
+| Reference documentation | [`docs/API.md`](docs/API.md) |
+
+### Brand assets
+
+The logo is an aperture mark generated from a single source of truth. `npm run brand:assets`
+writes the favicon set, PWA icons, press kit and social card; the same geometry is drawn
+inline in the app chrome by `src/components/BrandMark.jsx`. Downloads and usage rules are
+on `/press` and in [`docs/BRAND.md`](docs/BRAND.md).
+
+```bash
+export FCL_API_KEY="fcl_live_…"
+curl "$PUBLIC_BASE_URL/api/v1/me" -H "Authorization: Bearer $FCL_API_KEY"
+```
+
+Fourteen endpoints cover account/usage, projects, posts and publishing, films and scene
+generation, and connected channels. `tests/api-v1.test.js` calls every documented endpoint
+with a real key, so the published documentation cannot drift from the router. Provider-gated
+work (AI video, live social publishing) still requires operator credentials and returns
+`503` with the missing setting instead of fabricating output.
 
 ---
 
@@ -132,7 +189,7 @@ npm run setup -- --confirm smtp --note "SPF/DKIM verified, ticket 4471"
 npm run setup -- --unconfirm smtp        # undo a mistaken attestation
 npm run activate -- --list               # remaining modules, dependency order
 KEY=value npm run activate -- smtp       # one-by-one: configure, verify, record
-npm run deploy:check -- --origin https://studio.example.com
+npm run deploy:check -- --origin https://filmclublens.com
 npm run db:bootstrap                     # real Postgres + two-worker claim proof
 ```
 
@@ -320,7 +377,7 @@ Official docs used for the adapters:
 
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`: enable paid subscription checkout and signed webhooks.
 - Each paid plan needs a real Stripe `price_...` ID in Admin → Plans. Without it, checkout returns `stripe_price_missing`; no fake charge is attempted.
-- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook; set `NOTIFICATION_WEBHOOK_SECRET` to verify the HMAC `X-Faceless-Signature` (`sha256=HMAC(secret, "timestamp.rawBody")`). In-app notifications work without either.
+- `SMTP_URL` enables email notification delivery. `NOTIFICATION_WEBHOOK_URL` posts notification events to your webhook; set `NOTIFICATION_WEBHOOK_SECRET` to verify the HMAC `X-Film-Club-Lens-Signature` (`sha256=HMAC(secret, "timestamp.rawBody")`). In-app notifications work without either.
 
 ---
 
@@ -366,9 +423,10 @@ Log in as the seeded admin and open **Admin** to manage:
 - plan quotas and Stripe Price IDs;
 - global settings: signups, maintenance mode, review defaults, autopilot, retry limits, metrics interval, supported languages/platforms, content policy;
 - background jobs (retry/cancel), publishing failures, audit logs, and provider readiness;
-- in-app broadcast notifications and cleanup jobs.
+- in-app broadcast notifications and cleanup jobs;
+- **Providers**: choose the active AI, search, image, TTS and film-video providers, store their credentials, and override model ids — see [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
-Secrets remain environment-only; the admin UI cannot read or write API keys.
+Provider credentials are written only from the Super Admin dashboard. They are encrypted with `APP_ENCRYPTION_KEY`, are write-only once saved (the API returns presence, provenance and the last four characters, never the key), and fall back to the environment when cleared. Creators see no provider configuration at all; unavailable capabilities report themselves honestly in context. Publishing scopes, OAuth client secrets and app-review status remain environment/provider-console concerns.
 
 ---
 
@@ -434,7 +492,7 @@ PostgreSQL + Caddy automatic HTTPS), `deploy/Caddyfile`, a dedicated
 cp .env.example .env && chmod 600 .env      # set DOMAIN, POSTGRES_PASSWORD, APP_ENCRYPTION_KEY
 docker compose up -d --build --scale worker=2
 npm run db:bootstrap                        # real Postgres schema + two-worker claim proof
-npm run deploy:check -- --origin https://studio.example.com --json
+npm run deploy:check -- --origin https://filmclublens.com --json
 ```
 
 `deploy:check` runs from **outside** the host and performs a real DNS lookup,
@@ -453,6 +511,6 @@ result and exits non-zero on any failure.
 - Local TTS and procedural visuals are functional but intentionally simpler than paid generative models.
 - No distributed transaction can atomically commit an external post and a local database row; idempotency keys, reference codes, provider-side duplicate scans, and conditional claims minimize duplicate risk.
 - **AI filmmaking needs a paid video provider.** With `FILM_VIDEO_PROVIDER=none`, no AI clip can be produced; the platform refuses rather than fabricating one. Provider models, queues, regional access, watermarking and commercial rights are controlled by Replicate, Fal.ai and Google — review their current terms before distributing content.
-- Long movies are assembled from many short clips. Character identity across clips is best-effort via consistent appearance prompts; guaranteed identity locking and lip-sync require provider support and are not claimed where unavailable.
+- Long movies are assembled from many short clips. Character identity across clips is best-effort via consistent appearance prompts; guaranteed identity locking is not claimed. Picture-in-picture overlays, brand logos, speed ramps, VFX looks and timed text overlays are burned in by FFmpeg, and every completed render also writes separate voice/SFX/music stems. Lip-sync has a dedicated `POST /api/films/:id/scenes/:sceneId/lipsync` path (clip + voice take required) and motion transfer animates a storyboard still, but both need `FILM_LIPSYNC_PROVIDER` / `FILM_MOTION_PROVIDER`, a Replicate/fal key and an explicit model id; without them the API answers 503 and the buttons stay disabled. Local VFX looks, speed ramps and timed text overlays are plain FFmpeg and always available.
 - The mobile experience is an **installable responsive PWA**, not a native App Store / Play Store app. Native wrappers, push notifications and in-app purchases are not implemented.
 - Purchasable credit packs are not implemented: signup grants follow the subscription plan; Stripe billing manages plans. Adding paid credit top-ups requires Price IDs and a webhook → ledger integration.

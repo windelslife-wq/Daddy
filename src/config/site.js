@@ -1,10 +1,11 @@
 export const SITE = {
-  name: 'Faceless Studio',
-  shortName: 'FS',
+  name: 'Film Club Lens',
+  shortName: 'FCL',
+  url: 'https://filmclublens.com',
   tagline: 'Create once. Publish everywhere.',
-  description: 'An AI-powered faceless video studio with real scheduling, official social publishing, analytics, and production safeguards.',
-  email: 'hello@faceless.studio',
-  securityEmail: 'security@faceless.studio',
+  description: 'Film Club Lens is an AI filmmaking and faceless-video studio with real scheduling, official social publishing, analytics, and production safeguards.',
+  email: 'hello@filmclublens.com',
+  securityEmail: 'security@filmclublens.com',
 };
 
 // One source of truth for the public website. Header menus, mobile navigation,
@@ -15,6 +16,7 @@ export const PUBLIC_PAGES = [
   { path: '/features', label: 'Features', title: 'Platform features', description: 'AI scripts, original visuals, narration, captions, rendering, publishing, and analytics.', group: 'product', icon: 'sparkles', eyebrow: 'Platform' },
   { path: '/solutions', label: 'Solutions', title: 'Solutions for creators and teams', description: 'Workflows for creators, agencies, educators, publishers, and businesses.', group: 'product', icon: 'layers', eyebrow: 'Who it is for' },
   { path: '/pricing', label: 'Pricing', title: 'Plans and pricing', description: 'Transparent usage-based plans with server-enforced limits.', group: 'product', icon: 'credit-card', eyebrow: 'Plans' },
+  { path: '/developers', label: 'Developers', title: 'Developer API', description: 'REST API reference, scoped API keys, signed webhooks and an OpenAPI 3.1 document for building on the platform.', group: 'product', icon: 'code', eyebrow: 'Developers' },
   { path: '/integrations', label: 'Integrations', title: 'Official publishing integrations', description: 'Connect Facebook, Instagram, YouTube, X, AI, media, and payment providers.', group: 'product', icon: 'plug', eyebrow: 'Connect' },
   { path: '/docs', label: 'Documentation', title: 'Documentation', description: 'Set up the platform, understand the workflow, and configure production services.', group: 'resources', icon: 'book', eyebrow: 'Get started' },
   { path: '/help', label: 'Help Center', title: 'Help Center', description: 'Answers about accounts, content generation, publishing, billing, and security.', group: 'resources', icon: 'help', eyebrow: 'Support' },
@@ -22,7 +24,7 @@ export const PUBLIC_PAGES = [
   { path: '/security', label: 'Security', title: 'Security', description: 'How credentials, sessions, webhooks, media, and account data are protected.', group: 'resources', icon: 'shield', eyebrow: 'Trust' },
   { path: '/changelog', label: 'Changelog', title: 'Product changelog', description: 'Recent platform improvements, integration work, and verification milestones.', group: 'resources', icon: 'clock', eyebrow: 'Updates' },
   { path: '/sitemap', label: 'Sitemap', title: 'Sitemap', description: 'Every public page and workspace destination in one organized index.', group: 'resources', icon: 'list-checks', eyebrow: 'Index' },
-  { path: '/about', label: 'About', title: 'About Faceless Studio', description: 'The principles behind a responsible, creator-first automation platform.', group: 'company', icon: 'users', eyebrow: 'Company' },
+  { path: '/about', label: 'About', title: 'About Film Club Lens', description: 'The principles behind a responsible, creator-first automation platform.', group: 'company', icon: 'users', eyebrow: 'Company' },
   { path: '/contact', label: 'Contact', title: 'Contact us', description: 'Talk to the team about setup, integrations, partnerships, or security.', group: 'company', icon: 'mail', eyebrow: 'Contact' },
   { path: '/careers', label: 'Careers', title: 'Careers', description: 'Help build trustworthy creative automation tools.', group: 'company', icon: 'briefcase', eyebrow: 'Careers' },
   { path: '/press', label: 'Press', title: 'Press and brand', description: 'Product facts, positioning, and media contact details.', group: 'company', icon: 'megaphone', eyebrow: 'Media' },
@@ -64,6 +66,7 @@ export const APP_PAGES = [
   { path: '/app/analytics', label: 'Analytics', icon: 'bar-chart' },
   { path: '/app/billing', label: 'Plans & Billing', icon: 'credit-card' },
   { path: '/app/settings', label: 'Settings', icon: 'settings' },
+  { path: '/app/developers', label: 'Developer API', icon: 'key' },
   { path: '/app/admin', label: 'Admin', icon: 'shield', admin: true },
 ];
 
@@ -74,6 +77,10 @@ export const FILM_PAGES = [
   { path: '/app/films/short', label: 'Short Drama Studio', icon: 'smartphone' },
   { path: '/app/films/long', label: 'Long Drama & Movie', icon: 'film' },
   { path: '/app/films/series', label: 'Series & Episodes', icon: 'layers' },
+  { path: '/app/films/agent', label: 'AI Production Agent', icon: 'list-checks' },
+  { path: '/app/films/canvas', label: 'Creative Canvas', icon: 'workflow' },
+  { path: '/app/films/ads', label: 'Ad Studio', icon: 'megaphone' },
+  { path: '/app/films/models', label: 'Models & Providers', icon: 'shield-check' },
   { path: '/app/films/scripts', label: 'AI Script Writer', icon: 'pen-line' },
   { path: '/app/films/characters', label: 'Character Studio', icon: 'users' },
   { path: '/app/films/scenes', label: 'Scene Generator', icon: 'wand-sparkles' },

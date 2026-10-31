@@ -1,6 +1,6 @@
 # AI Filmmaking Platform — Implementation Plan
 
-**Project:** Faceless Studio → AI Filmmaking Studio
+**Project:** Film Club Lens → AI Filmmaking Studio
 **Scope:** Short drama, long drama, episodic series, and movie production in one
 unified platform (Web, Android, iOS).
 **Status of this document:** original architecture + phased plan, kept for

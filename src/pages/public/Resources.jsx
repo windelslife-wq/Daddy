@@ -61,6 +61,12 @@ STRIPE_WEBHOOK_SECRET=...`}</code></pre></div></article>
           <FeatureCard icon="shield" title="Admin" description="Users, plans, settings, jobs, broadcasts, and integration readiness reporting." />
         </div>
       </Section>
+      <Section eyebrow="Build on it" title="A public REST API for your own tools" description="Session endpoints above power the app. Integrations outside the browser use the versioned developer API with scoped keys, signed webhooks and an OpenAPI 3.1 document.">
+        <div className="hero-actions">
+          <Link to="/developers" className="btn btn-primary">Read the API reference <Icon name="arrow-right" size={16} /></Link>
+          <a className="btn btn-secondary" href="/api/developer/openapi.json" download="film-club-lens-openapi.json">Download OpenAPI</a>
+        </div>
+      </Section>
       <CTASection title="Need help with a deployment decision?" description="Send us the context and we’ll point you to the relevant configuration or provider-console requirement." primary={{ to: '/contact', label: 'Contact the team' }} secondary={{ to: '/help', label: 'Visit help center' }} />
     </>
   );
@@ -304,11 +310,18 @@ export function Careers() {
   );
 }
 
+const BRAND_ASSETS = [
+  { href: '/brand/logo-mark.svg', title: 'Logo mark', meta: 'SVG · vector', alt: 'Film Club Lens logo mark', dark: false },
+  { href: '/brand/logo-lockup-inverse.svg', title: 'Horizontal lockup', meta: 'SVG · on dark', alt: 'Film Club Lens lockup for dark backgrounds', dark: true, wide: true },
+  { href: '/brand/logo-mark-1024.png', title: 'App icon', meta: 'PNG · 1024 × 1024', alt: 'Film Club Lens app icon', dark: false },
+  { href: '/brand/og-image.png', title: 'Social card', meta: 'PNG · 1200 × 630', alt: 'Film Club Lens social share card', dark: true, wide: true }
+];
+
 export function Press() {
   const factSheet = `${SITE.name}\n${SITE.tagline}\n\n${SITE.description}\n\nWebsite: ${typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.example'}\nMedia contact: ${SITE.email}\nSecurity contact: ${SITE.securityEmail}\n\nProduct: AI-assisted faceless video creation, review, scheduling, official social publishing, analytics, and administration.\nDeployment: Local-first evaluation, PostgreSQL production mode, background workers, encrypted credentials, and signed webhooks.\n`;
   return (
     <>
-      <PageHero eyebrow="Press & brand" title="Product facts for writers and partners" description="Use this page for an accurate summary of what Faceless Studio is, how it works, and where its integration boundaries are." actions={<a className="btn btn-primary btn-lg" href={`data:text/plain,${encodeURIComponent(factSheet)}`} download="faceless-studio-fact-sheet.txt"><Icon name="download" size={16} /> Download fact sheet</a>} />
+      <PageHero eyebrow="Press & brand" title="Product facts for writers and partners" description="Use this page for an accurate summary of what Film Club Lens is, how it works, and where its integration boundaries are." actions={<a className="btn btn-primary btn-lg" href={`data:text/plain,${encodeURIComponent(factSheet)}`} download="film-club-lens-fact-sheet.txt"><Icon name="download" size={16} /> Download fact sheet</a>} />
       <Section eyebrow="Positioning" title="What the platform does" description="A professional AI content operations system with real workflow, security, and publishing controls." align="center">
         <div className="press-statement"><Icon name="quote" size={28} /><p>{SITE.description} It supports local evaluation without paid APIs, then connects official provider integrations when organizational credentials and approvals are ready.</p></div>
       </Section>
@@ -321,6 +334,22 @@ export function Press() {
           <div><span>Security</span><strong>Encrypted credentials, HTTP-only sessions, signed webhooks</strong></div>
           <div><span>Verification</span><strong>Provider simulators, E2E, visual QA, readiness CLI</strong></div>
         </div>
+      </Section>
+      <Section className="section-alt" eyebrow="Brand assets" title="Logos for articles, decks, and store listings" description="Every file below is generated from the same geometry as the app icon and favicon, so nothing you download can drift out of date.">
+        <div className="brand-kit-grid">
+          {BRAND_ASSETS.map((asset) => (
+            <div className="card brand-kit-card" key={asset.href}>
+              <div className={asset.dark ? 'brand-kit-preview dark' : 'brand-kit-preview'}>
+                <img src={asset.href} alt={asset.alt} className={asset.wide ? 'wide' : undefined} loading="lazy" />
+              </div>
+              <div className="brand-kit-meta"><strong>{asset.title}</strong><span>{asset.meta}</span></div>
+              <a className="btn btn-ghost btn-sm" href={asset.href} download><Icon name="download" size={14} /> Download</a>
+            </div>
+          ))}
+        </div>
+        <Callout icon="info" title="Keeping the mark recognisable">
+          Use the violet badge or the lockup as supplied. Keep clear space of at least half the badge width, do not recolour the cyan lens core, and do not place the dark lockup on a light background. Palette: violet <code>#8b7cff</code>, deep violet <code>#5138d8</code>, cyan <code>#42d9d0</code>, night <code>#070a14</code>. Do not imply endorsement or partnership in headlines.
+        </Callout>
       </Section>
       <Section eyebrow="Media contact" title="Request clarification before publishing" description={`For product questions, screenshots, or technical details, contact ${SITE.email}. We can confirm whether a capability is live, local, or dependent on external provider approval.`}>
         <Callout icon="megaphone" title="Please avoid unsupported claims" tone="warning">

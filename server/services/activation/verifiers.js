@@ -16,7 +16,7 @@
  */
 import crypto from 'node:crypto';
 import { ACTIVATION_MODULES, getModule, applicableEnv } from './modules.js';
-import { isSet, runValidator } from './validators.js';
+import { isSet, runValidator, isLocalHostname } from './validators.js';
 
 const DEFAULT_ROOTS = {
   openai: 'https://api.openai.com/v1',
@@ -253,9 +253,9 @@ async function verifyWebhook(ctx) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-faceless-event': 'activation.ping',
-      'x-faceless-timestamp': String(timestamp),
-      'x-faceless-signature': signature,
+      'x-film-club-lens-event': 'activation.ping',
+      'x-film-club-lens-timestamp': String(timestamp),
+      'x-film-club-lens-signature': signature,
     },
     body: raw,
     okStatuses: [200, 201, 202, 204],
@@ -309,7 +309,7 @@ async function verifyResearch(ctx) {
   const check = provider === 'brave'
     ? await httpCheck(ctx, {
       name: 'Brave Search API',
-      url: urlWithParams(`${ctx.roots.brave}/search`, { q: 'faceless studio activation', count: 1 }),
+      url: urlWithParams(`${ctx.roots.brave}/search`, { q: 'film club lens activation', count: 1 }),
       headers: { 'x-subscription-token': env.SEARCH_API_KEY, accept: 'application/json' },
       onOk: () => 'Brave accepted the API key (minimal 1-result query).',
       onFail: (data, status) => `Brave rejected the key (${status}): ${providerError(data)}.`,
@@ -319,7 +319,7 @@ async function verifyResearch(ctx) {
       url: `${ctx.roots.tavily}/search`,
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${env.SEARCH_API_KEY}` },
-      body: JSON.stringify({ query: 'faceless studio activation', max_results: 1 }),
+      body: JSON.stringify({ query: 'film club lens activation', max_results: 1 }),
       onOk: () => 'Tavily accepted the API key (minimal 1-result query).',
       onFail: (data, status) => `Tavily rejected the key (${status}): ${providerError(data)}.`,
     });
@@ -402,9 +402,33 @@ async function verifyPostgres(ctx) {
   };
   try {
     const outcome = await ctx.pgCheckImpl(env.DATABASE_URL, ctx.timeoutMs);
-    return outcome.ok
-      ? result([checkPass('database connection', 'Connected to PostgreSQL and SELECT 1 succeeded.')], {})
-      : result([checkFail('database connection', outcome.message)], { action: 'Check host, credentials, TLS mode, and firewall rules.' });
+    if (!outcome.ok) {
+      return result([checkFail('database connection', outcome.message)], { action: 'Check host, credentials, TLS mode, and firewall rules.' });
+    }
+    const checks = [checkPass('database connection',
+      `Connected to PostgreSQL${outcome.version ? ` ${outcome.version}` : ''} and SELECT 1 succeeded.`)];
+    // TLS: a remote database without encryption sends the password and every
+    // query in plaintext. Local/private hosts are allowed to skip it.
+    let local = false;
+    try { local = isLocalHostname(new URL(env.DATABASE_URL).hostname); } catch { local = false; }
+    if (outcome.tls === true) {
+      checks.push(checkPass('TLS in use', 'The connection is encrypted (pg_stat_ssl reports ssl = true).'));
+    } else if (outcome.tls === false) {
+      checks.push(local
+        ? checkPass('TLS in use', 'Plaintext connection to a local/private host — acceptable for local development only.')
+        : checkFail('TLS in use', 'The connection to this remote host is NOT encrypted. Append ?sslmode=require to DATABASE_URL.'));
+    } else {
+      checks.push(checkSkip('TLS in use', 'Server did not report pg_stat_ssl for this role; confirm TLS in the provider console.'));
+    }
+    if (outcome.tables == null) {
+      checks.push(checkSkip('schema readiness', 'Could not read pg_tables with this role; run `npm run db:bootstrap` to create and verify the schema.'));
+    } else if (outcome.missingCore?.length) {
+      checks.push(checkSkip('schema readiness',
+        `${outcome.tables} table(s) present; missing ${outcome.missingCore.join(', ')}. Run \`npm run db:bootstrap\` to create the schema.`));
+    } else {
+      checks.push(checkPass('schema readiness', `${outcome.tables} public table(s) present, including users, jobs, projects, accounts and plans.`));
+    }
+    return result(checks, { action: 'Run `npm run db:bootstrap` to prove schema creation and two-worker job claims.' });
   } catch (error) {
     return result([checkFail('database connection', sanitize(error.message, env))], { action: 'Check network egress to the database host.' });
   }

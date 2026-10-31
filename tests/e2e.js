@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 const root = path.resolve(import.meta.dirname, '..');
 const port = 8900 + Math.floor(Math.random() * 900);
 const base = `http://127.0.0.1:${port}`;
-const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'faceless-studio-e2e-'));
+const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'film-club-lens-e2e-'));
 const dataDir = path.join(tempDir, 'data');
 const storageDir = path.join(tempDir, 'storage');
 await fs.mkdir(dataDir, { recursive: true });

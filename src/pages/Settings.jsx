@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Bell, BrainCircuit, CheckCircle2, Cpu, KeyRound, LockKeyhole, Settings as SettingsIcon, UserRound, Zap } from 'lucide-react';
+import { Bell, CheckCircle2, KeyRound, LockKeyhole, Settings as SettingsIcon, UserRound, Zap } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLoad } from '../hooks.js';
 import { get, patch, post } from '../api.js';
-import { Button, Card, ErrorBanner, Field, InfoBanner, KeyValue, PageHeader, QuotaBar, Spinner, StatusBadge, Tabs, Toggle, useToast } from '../components/ui.jsx';
+import { Button, Card, ErrorBanner, Field, InfoBanner, KeyValue, PageHeader, QuotaBar, Spinner, Tabs, Toggle, useToast } from '../components/ui.jsx';
 
 export default function Settings() {
   const { user, refresh, providerStatus } = useAuth();
@@ -32,13 +32,12 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader eyebrow="Workspace" title="Settings" description="Manage your profile, defaults, security, quotas, and provider readiness." actions={<Button to="/app/billing" variant="secondary">Manage plan</Button>} />
+      <PageHeader eyebrow="Workspace" title="Settings" description="Manage your profile, defaults, security, quotas, and notifications." actions={<Button to="/app/billing" variant="secondary">Manage plan</Button>} />
       <ErrorBanner error={error} onRetry={() => reload().catch(() => {})} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { id: 'profile', label: 'Profile', icon: UserRound },
         { id: 'preferences', label: 'Preferences', icon: SettingsIcon },
         { id: 'security', label: 'Security', icon: LockKeyhole },
-        { id: 'providers', label: 'AI providers', icon: BrainCircuit },
         { id: 'usage', label: 'Usage & quotas', icon: Zap },
         { id: 'notifications', label: 'Notifications', icon: Bell },
       ]} />
@@ -85,25 +84,6 @@ export default function Settings() {
                   <div className="banner banner-warning" style={{ margin: 0 }}>Changing your password revokes existing sessions. You will be signed out and need to log in again.</div>
                 </div>
               )}
-              {tab === 'providers' && (
-                <div className="stack">
-                  <h2>Provider status</h2>
-                  <p className="tiny">Provider selection and API keys are read from server environment variables. No secret is stored in frontend code.</p>
-                  <div className="key-value">
-                    {[
-                      ['AI script', providerStatus?.ai?.active || 'local'], ['AI configured', providerStatus?.ai?.configured ? 'Yes' : 'No'],
-                      ['Research', providerStatus?.research?.active || 'none'], ['Image generation', providerStatus?.images?.active || 'procedural'],
-                      ['Text to speech', providerStatus?.tts?.active || 'mespeak'], ['Renderer', providerStatus?.videoRenderer || 'ffmpeg'],
-                      ['Public base URL', providerStatus?.publicBaseUrl], ['Public media', providerStatus?.publicMediaReady ? 'HTTPS ready' : 'Local only'],
-                    ].map(([key, value]) => <div className="kv-item" key={key}><span>{key}</span><strong>{value || '—'}</strong></div>)}
-                  </div>
-                  <InfoBanner icon={Cpu}><strong>Local mode works without paid APIs.</strong><span> Procedural scene art, mespeak narration, original ambient music, FFmpeg rendering, and sandbox publishing are active by default.</span></InfoBanner>
-                  <div className="grid grid-2">
-                    <Card title="Available AI providers" className="card"><div className="row row-wrap">{(providerStatus?.ai?.available || ['local']).map((item) => <StatusBadge key={item} status="connected" label={item} />)}</div></Card>
-                    <Card title="Available image providers" className="card"><div className="row row-wrap">{(providerStatus?.images?.available || ['procedural']).map((item) => <StatusBadge key={item} status="connected" label={item} />)}</div></Card>
-                  </div>
-                </div>
-              )}
               {tab === 'usage' && (
                 <div className="stack">
                   <h2>Usage & quotas</h2>
@@ -119,7 +99,7 @@ export default function Settings() {
                 <div className="stack">
                   <h2>Notifications</h2>
                   <p className="tiny">In-app notifications are always available. Email and webhook delivery depend on server configuration.</p>
-                  <KeyValue items={[['SMTP email', providerStatus?.notifications?.smtpConfigured ? 'Configured' : 'Not configured'], ['Webhook', providerStatus?.notifications?.webhookConfigured ? 'Configured' : 'Not configured'], ['Default privacy', settings.defaultPrivacy], ['Metrics sync interval', `${settings.metricsSyncIntervalHours || 6}h`], ['Max publish retries', settings.maxPublishRetries || 3]]} />
+                  <KeyValue items={[['Default privacy', settings.defaultPrivacy], ['Metrics sync interval', `${settings.metricsSyncIntervalHours || 6}h`], ['Max publish retries', settings.maxPublishRetries || 3]]} />
                   <Button variant="primary" disabled={busy} onClick={() => action(() => post('/api/settings/test-notification', {}), 'Test notification created.')}><Bell size={15} /> Send test notification</Button>
                   <div className="banner banner-info" style={{ margin: 0 }}><CheckCircle2 size={18} /><div><strong>Policy</strong><span>{settings.contentPolicy || 'Original content only.'}</span></div></div>
                 </div>

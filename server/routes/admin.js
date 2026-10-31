@@ -5,6 +5,10 @@ import { requireAuth, requireAdmin, userPublic } from '../auth.js';
 import { asyncHandler, badRequest, notFound, conflict } from '../errors.js';
 import { parseBody, planSchema } from '../validation.js';
 import { providerStatus, assertProductionSecrets } from '../config.js';
+import {
+  providerConfigView, updateProviderConfig, testProviderCredential,
+  MODALITIES, SECRETS, MODEL_FIELDS,
+} from '../providerConfig.js';
 import { retryPublication, publicationView } from '../services/projects.js';
 import { buildIntegrationReadiness } from '../services/integrationReadiness.js';
 import { checkAll as buildActivationReport } from '../services/activation/preflight.js';
@@ -36,6 +40,23 @@ const settingsPatchSchema = z.object({
   supportedLanguages: z.array(z.string().max(10)).max(30).optional(),
   supportedPlatforms: z.array(z.enum(['sandbox', 'facebook', 'instagram', 'youtube', 'x'])).min(1).max(5).optional(),
 }).refine((data) => Object.keys(data).length > 0, { message: 'No settings supplied.' });
+
+const providerConfigSchema = z.object({
+  // Credentials are strings; null or '' clears a stored value so the environment
+  // becomes the source again. Values themselves are never echoed back.
+  // Ids are validated against SECRETS / MODEL_FIELDS in providerConfig.js so the
+  // error names the offending field instead of failing the whole object shape.
+  secrets: z.record(z.string().max(60), z.union([z.string().min(1).max(500), z.null()])).optional(),
+  models: z.record(z.string().max(60), z.string().max(160)).optional(),
+  active: z.object(
+    Object.fromEntries(MODALITIES.map((modality) => [
+      modality.id,
+      z.enum(modality.options.map((option) => option.id)),
+    ])),
+  ).partial().optional(),
+}).refine((data) => (
+  Object.keys(data.secrets || {}).length + Object.keys(data.models || {}).length + Object.keys(data.active || {}).length > 0
+), { message: 'No provider changes supplied.' });
 
 const activationConfirmSchema = z.object({
   confirmed: z.boolean().default(true),
@@ -203,6 +224,49 @@ export function adminRouter() {
     await db('plans').where({ id: plan.id }).update(update);
     await logAudit({ userId: req.user.id, action: 'admin.plan.update', entityType: 'plan', entityId: plan.id, details: data });
     res.json({ plan: planView(await db('plans').where({ id: plan.id }).first()) });
+  }));
+
+  /**
+   * Provider configuration — the only place credentials can be written.
+   *
+   * Status is readable by any admin; writes are audited with secret *names* only.
+   * Responses never contain a plaintext key, not even masked fragments beyond the
+   * last four characters.
+   */
+  router.get('/providers', asyncHandler(async (_req, res) => {
+    res.json(providerConfigView());
+  }));
+
+  router.put('/providers', asyncHandler(async (req, res) => {
+    const data = parseBody(providerConfigSchema, req.body);
+    const result = await updateProviderConfig(data, req.user.id);
+    await logAudit({
+      userId: req.user.id,
+      action: 'admin.providers.update',
+      entityType: 'provider_config',
+      entityId: 'default',
+      details: {
+        active: data.active || {},
+        models: data.models || {},
+        credentialsSet: result.written,
+        credentialsCleared: result.cleared,
+      },
+    });
+    res.json(providerConfigView());
+  }));
+
+  router.post('/providers/test', asyncHandler(async (req, res) => {
+    const target = String(req.body?.target || '').trim();
+    if (!target) throw badRequest('Choose a credential to test.');
+    const result = await testProviderCredential(target);
+    await logAudit({
+      userId: req.user.id,
+      action: 'admin.providers.test',
+      entityType: 'provider_config',
+      entityId: target,
+      details: { target, checked: result.checked, ok: result.ok, code: result.code },
+    });
+    res.json(result);
   }));
 
   router.get('/settings', asyncHandler(async (_req, res) => {

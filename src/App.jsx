@@ -15,6 +15,7 @@ import Pricing from './pages/public/Pricing.jsx';
 import About from './pages/public/About.jsx';
 import Contact from './pages/public/Contact.jsx';
 import { Docs, Integrations, Help, Status, Security, Changelog, Careers, Press } from './pages/public/Resources.jsx';
+import ApiDocs from './pages/public/ApiDocs.jsx';
 import Sitemap from './pages/public/Sitemap.jsx';
 import { Privacy, Terms, Cookies, AcceptableUse, Dpa } from './pages/public/Legal.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -29,8 +30,13 @@ import Automation from './pages/Automation.jsx';
 import Settings from './pages/Settings.jsx';
 import Billing from './pages/Billing.jsx';
 import Admin from './pages/Admin.jsx';
+import Developers from './pages/Developers.jsx';
 import FilmStudio from './pages/film/FilmStudio.jsx';
+import ProductionAgent from './pages/film/ProductionAgent.jsx';
+import CreativeCanvas from './pages/film/CreativeCanvas.jsx';
+import ModelMarketplace from './pages/film/ModelMarketplace.jsx';
 import FilmWorkspace from './pages/film/FilmWorkspace.jsx';
+import AdStudio from './pages/film/AdStudio.jsx';
 import SandboxConsent from './pages/SandboxConsent.jsx';
 import SandboxPost from './pages/SandboxPost.jsx';
 import NotFound from './pages/NotFound.jsx';
@@ -91,12 +97,17 @@ export default function App() {
           <Route path="analytics" element={<Analytics />} />
           <Route path="automation" element={<Automation />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="developers" element={<Developers />} />
           <Route path="billing" element={<Billing />} />
           <Route path="admin" element={<Admin />} />
           <Route path="films" element={<FilmStudio view="hub" />} />
           <Route path="films/short" element={<FilmStudio view="short" />} />
           <Route path="films/long" element={<FilmStudio view="long" />} />
           <Route path="films/series" element={<FilmStudio view="series" />} />
+          <Route path="films/agent" element={<ProductionAgent />} />
+          <Route path="films/canvas" element={<CreativeCanvas />} />
+          <Route path="films/ads" element={<AdStudio />} />
+          <Route path="films/models" element={<ModelMarketplace />} />
           <Route path="films/scripts" element={<FilmStudio view="scripts" />} />
           <Route path="films/characters" element={<FilmStudio view="characters" />} />
           <Route path="films/scenes" element={<FilmStudio view="scenes" />} />
@@ -114,6 +125,7 @@ export default function App() {
           <Route path="/features" element={<Features />} />
           <Route path="/solutions" element={<Solutions />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/developers" element={<ApiDocs />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/help" element={<Help />} />

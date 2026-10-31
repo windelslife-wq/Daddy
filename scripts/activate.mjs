@@ -12,7 +12,7 @@
  *   npm run activate -- --list
  *   SMTP_URL=smtp://user:pass@mail.example.com:587 \
  *     npm run activate -- smtp --attest "SPF/DKIM configured, ticket 4471"
- *   npm run activate -- 12 --set PUBLIC_BASE_URL=https://studio.example.com
+ *   npm run activate -- 12 --set PUBLIC_BASE_URL=https://filmclublens.com
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -207,7 +207,7 @@ export async function buildIntegrationReadiness({ probe = false } = {}) {
     'Signed notification webhooks',
     status.notifications.webhookConfigured && status.notifications.webhookSigned ? 'pass' : 'warn',
     status.notifications.webhookConfigured ? `Webhook configured; HMAC signing ${status.notifications.webhookSigned ? 'enabled' : 'disabled'}.` : 'NOTIFICATION_WEBHOOK_URL is not configured.',
-    'Configure NOTIFICATION_WEBHOOK_URL and NOTIFICATION_WEBHOOK_SECRET; verify X-Faceless-Signature with the shared secret.',
+    'Configure NOTIFICATION_WEBHOOK_URL and NOTIFICATION_WEBHOOK_SECRET; verify X-Film-Club-Lens-Signature with the shared secret.',
   ));
 
   for (const [key, integration] of Object.entries(status.integrations)) {
