@@ -104,20 +104,39 @@ export async function assemblyPreflight(filmId) {
   };
 }
 
-async function normaliseClip(clipPath, outputPath, durationSeconds, width, height, onProgress = () => {}) {
+async function normaliseClip(clipPath, outputPath, durationSeconds, width, height, onProgress = () => {}, edit = {}) {
   const clipProbe = await probeVideo(clipPath);
   if (!clipProbe.hasVideo || clipProbe.durationSeconds < 0.2) {
     throw new AppError(502, 'clip_invalid', `Scene clip ${path.basename(clipPath)} has no usable video stream; regenerate this scene.`);
   }
   const duration = formatFfmpegDuration(durationSeconds);
+  // Editorial decisions are applied here, where every clip is already being
+  // re-encoded onto the master canvas, so the concat stays stream-copy.
+  const trimStart = Math.max(0, Number(edit.trimStart) || 0);
+  const trimEnd = Math.max(0, Number(edit.trimEnd) || 0);
+  const usable = Math.max(0.4, clipProbe.durationSeconds - trimStart - trimEnd);
+  const visible = Math.min(durationSeconds, usable);
+  const fade = Math.min(0.6, Math.max(0.2, Number(config.film.transitionFadeSeconds) || 0.5));
+  const transition = String(edit.transition || 'cut');
+  const fades = [];
+  if (visible > fade * 2) {
+    if (transition === 'fade_black' || transition === 'dip_white') {
+      const color = transition === 'dip_white' ? 'white' : 'black';
+      fades.push(`fade=t=in:st=0:d=${fade}:color=${color}`);
+      fades.push(`fade=t=out:st=${(visible - fade).toFixed(3)}:d=${fade}:color=${color}`);
+    }
+  }
   const filter = [
     `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
     `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`,
     `fps=${FPS}`, 'setsar=1',
     'tpad=stop_mode=clone:stop_duration=10',
-    `trim=duration=${duration}`, 'setpts=PTS-STARTPTS', 'format=yuv420p',
+    `trim=duration=${duration}`, 'setpts=PTS-STARTPTS',
+    ...fades,
+    'format=yuv420p',
   ].join(',');
   await ffmpegWithProgress([
+    ...(trimStart > 0 ? ['-ss', formatFfmpegDuration(trimStart)] : []),
     '-i', clipPath, '-vf', filter, '-an',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-r', String(FPS), '-movflags', '+faststart', outputPath,
@@ -274,7 +293,7 @@ export async function assembleFilm(filmId, {
     await normaliseClip(scene.clip_path, output, sceneSeconds, width, height, (ratio) => {
       const overall = 4 + ((i + ratio) / scenes.length) * 48;
       onProgress(Math.round(Math.min(52, overall)), 'normalising_clips').catch(() => {});
-    });
+    }, { trimStart: scene.trim_start, trimEnd: scene.trim_end, transition: scene.transition });
     normalised.push(output);
     await onProgress(Math.round(4 + ((i + 1) / scenes.length) * 48), 'normalising_clips');
   }

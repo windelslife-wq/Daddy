@@ -89,6 +89,10 @@ export const patchSceneSchema = z.object({
   lighting: emptyOr(LIGHTING),
   color_grade: emptyOr(COLOR_GRADES),
   composition: z.string().max(400).optional(),
+  // Timeline / edit decisions. They change the render, so they are validated.
+  transition: z.enum(['cut', 'fade_black', 'dip_white']).optional(),
+  trim_start: z.number().min(0).max(30).optional(),
+  trim_end: z.number().min(0).max(30).optional(),
   sfx: z.array(z.object({
     assetId: z.string().min(1).max(60),
     atSeconds: z.number().min(0).max(120).optional().default(0),
@@ -127,6 +131,7 @@ export function filmView(row, summary = {}) {
     creditsSpent: number(row.credits_spent),
     hasVideo: Boolean(row.final_video_path),
     hasThumbnail: Boolean(row.thumbnail_path),
+    hasPoster: Boolean(row.poster_path && fs.existsSync(row.poster_path)),
     hasCaptions: Boolean(row.caption_path),
     durationSeconds: number(row.duration_seconds),
     error: row.error || null,
@@ -173,6 +178,14 @@ export function sceneView(row) {
     detail: row.detail || null,
     hasClip: Boolean(row.clip_path && fs.existsSync(row.clip_path)),
     hasPoster: Boolean(row.poster_path && fs.existsSync(row.poster_path)),
+    hasStoryboard: Boolean(row.storyboard_path && fs.existsSync(row.storyboard_path)),
+    storyboardProvider: row.storyboard_provider || null,
+    hasVoiceTake: Boolean(row.voice_path && fs.existsSync(row.voice_path)),
+    voiceProvider: row.voice_provider || null,
+    voiceDurationSeconds: Number(row.voice_duration) || 0,
+    transition: row.transition || 'cut',
+    trimStart: Number(row.trim_start) || 0,
+    trimEnd: Number(row.trim_end) || 0,
     provider: row.provider || null,
     providerJobId: row.provider_job_id || null,
     creditsCost: number(row.credits_cost),
@@ -405,6 +418,7 @@ export async function updateScene(userId, filmId, sceneId, patch, role = 'user')
   for (const key of [
     'heading', 'location', 'time_of_day', 'description', 'camera_movement', 'visual_prompt',
     'duration_seconds', 'shot_size', 'camera_angle', 'lens', 'lighting', 'color_grade', 'composition',
+    'transition', 'trim_start', 'trim_end',
   ]) {
     if (data[key] !== undefined) updates[key] = data[key];
   }

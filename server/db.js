@@ -371,6 +371,7 @@ export const tableDefinitions = {
     t.integer('credits_spent').notNullable().defaultTo(0);
     t.text('final_video_path');
     t.text('thumbnail_path');
+    t.text('poster_path');
     t.text('caption_path');
     t.integer('duration_seconds').notNullable().defaultTo(0);
     t.text('error');
@@ -464,6 +465,35 @@ export const tableDefinitions = {
     t.string('updated_at', 40).notNullable();
     t.unique(['film_id', 'ordinal']);
   },
+  film_storyboard_frames: (t) => {
+    t.string('id', 48).primary();
+    t.string('film_id', 48).notNullable().index();
+    t.string('scene_id', 48).index();
+    t.string('kind', 20).notNullable().defaultTo('scene');
+    t.string('character_id', 48).index();
+    t.text('path');
+    t.string('provider', 60);
+    t.integer('width').notNullable().defaultTo(0);
+    t.integer('height').notNullable().defaultTo(0);
+    t.text('prompt');
+    t.string('status', 20).notNullable().defaultTo('ready');
+    t.text('error');
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+    t.unique(['film_id', 'scene_id', 'kind']);
+  },
+  film_flows: (t) => {
+    t.string('id', 48).primary();
+    t.string('user_id', 48).notNullable().index();
+    t.string('film_id', 48).index();
+    t.string('name', 160).notNullable().defaultTo('Untitled flow');
+    t.text('graph').notNullable().defaultTo('{}');
+    t.string('status', 30).notNullable().defaultTo('draft');
+    t.text('last_run');
+    t.string('last_run_at', 40);
+    t.string('created_at', 40).notNullable();
+    t.string('updated_at', 40).notNullable();
+  },
   film_productions: (t) => {
     t.string('id', 48).primary();
     t.string('film_id', 48).notNullable().unique();
@@ -554,6 +584,7 @@ export async function initializeDatabase(database, options = {}) {
   const filmColumns = {
     film_projects: {
       progress: (t) => t.integer('progress').notNullable().defaultTo(0),
+      poster_path: (t) => t.text('poster_path'),
       detail: (t) => t.text('detail'),
       reference_image_path: (t) => t.text('reference_image_path'),
       music_path: (t) => t.text('music_path'),
@@ -578,6 +609,15 @@ export async function initializeDatabase(database, options = {}) {
       lighting: (t) => t.string('lighting', 60).notNullable().defaultTo(''),
       color_grade: (t) => t.string('color_grade', 60).notNullable().defaultTo(''),
       composition: (t) => t.text('composition').notNullable().defaultTo(''),
+      storyboard_path: (t) => t.text('storyboard_path'),
+      storyboard_provider: (t) => t.string('storyboard_provider', 60),
+      storyboard_at: (t) => t.string('storyboard_at', 40),
+      voice_provider: (t) => t.string('voice_provider', 60),
+      voice_duration: (t) => t.decimal('voice_duration', 8, 2).notNullable().defaultTo(0),
+      voice_at: (t) => t.string('voice_at', 40),
+      trim_start: (t) => t.decimal('trim_start', 6, 2).notNullable().defaultTo(0),
+      trim_end: (t) => t.decimal('trim_end', 6, 2).notNullable().defaultTo(0),
+      transition: (t) => t.string('transition', 30).notNullable().defaultTo('cut'),
     },
   };
   for (const [table, columns] of Object.entries(filmColumns)) {

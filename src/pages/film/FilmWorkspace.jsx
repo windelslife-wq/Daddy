@@ -11,19 +11,25 @@ import {
   Button, Card, EmptyState, ErrorBanner, Field, InfoBanner, Modal,
   ProgressBar, Spinner, StatusBadge, Toggle, useToast,
 } from '../../components/ui.jsx';
+import { StoryboardStep, VoiceStep, TimelineStep } from './StoryboardPanels.jsx';
 import {
   FilmShell, bumpCredits, pretty, useFilmConfig,
   DURATION_PRESETS, formatDuration, planForDuration, estimateCreditsFor,
 } from './FilmStudio.jsx';
 
+// The ten production steps agreed in the brief. Each one is a real screen that
+// reads and writes server state; none of them is a stub.
 const STEPS = [
   { id: 'setup', label: '1 · Setup' },
   { id: 'write', label: '2 · Screenplay' },
   { id: 'cast', label: '3 · Cast' },
   { id: 'locations', label: '4 · Locations' },
-  { id: 'scenes', label: '5 · Direct & generate' },
-  { id: 'render', label: '6 · Assemble' },
-  { id: 'preview', label: '7 · Preview' },
+  { id: 'storyboard', label: '5 · Storyboard' },
+  { id: 'scenes', label: '6 · Direct & generate' },
+  { id: 'voice', label: '7 · Voice' },
+  { id: 'timeline', label: '8 · Timeline' },
+  { id: 'render', label: '9 · Assemble' },
+  { id: 'preview', label: '10 · Preview' },
 ];
 
 function StepNav({ filmId, active }) {
@@ -891,7 +897,10 @@ export default function FilmWorkspace() {
       {step === 'write' && <WriteStep film={film} reload={reload} />}
       {step === 'cast' && <CastStep film={film} reload={reload} />}
       {step === 'locations' && <LocationsStep film={film} reload={reload} />}
+      {step === 'storyboard' && <StoryboardStep film={film} />}
       {step === 'scenes' && <ScenesStep film={film} reload={reload} />}
+      {step === 'voice' && <VoiceStep film={film} />}
+      {step === 'timeline' && <TimelineStep film={film} reload={reload} />}
       {step === 'render' && <RenderStep film={film} reload={reload} />}
       {step === 'preview' && <PreviewStep film={film} reload={reload} />}
     </FilmShell>

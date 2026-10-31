@@ -88,6 +88,36 @@ approval because they spend credits and call a paid provider.
 The full audit and the remaining phases are documented in
 [docs/FILM-STUDIO-AUDIT.md](FILM-STUDIO-AUDIT.md).
 
+### Storyboards, voice takes, editing and the canvas
+
+- **Storyboard & poster** (`/app/films/project/:id?step=storyboard`). Stills are
+  generated from the same scene prompt the video provider receives, so the frame
+  and the clip agree on cast, location, lens, lighting and grade. With
+  `IMAGE_PROVIDER=procedural` the server renders real PNGs locally (labelled
+  procedural, never AI, never used as a face reference); with
+  `IMAGE_PROVIDER=openai|replicate` they are model-drawn. Posters use the
+  logline and palette; character concept art can become the reference image only
+  when it comes from a real image model.
+- **Voice takes** (`step=voice`). Each scene with dialogue gets a real WAV take
+  from the configured TTS engine (meSpeak offline, OpenAI or ElevenLabs with a
+  key), with measured duration and playback. They are for pacing and line checks;
+  the final mix voices the same lines at assembly.
+- **Timeline** (`step=timeline`). Per scene: trim the head and tail and choose
+  `cut`, `fade_black` or `dip_white`. These are applied by FFmpeg while each clip
+  is normalised, so the stream-copy concat stays fast, and any edit invalidates
+  the previous render.
+- **Creative Canvas** (`/app/films/canvas`). Persisted node flows over the same
+  services: text, screenplay, image, voice and credit-metered scene clips. Flows
+  run in dependency order, cycles are rejected, and a failing node skips its
+  downstream nodes with the real error recorded.
+- **Models & Providers** (`/app/films/models`). Live readiness, limits,
+  capabilities and per-scene credit prices for every configured or missing
+  provider. Activation is an operator action; the page never accepts secrets.
+
+The workspace is a ten-step resumable wizard: setup → screenplay → cast →
+locations → storyboard → direct & generate → voice → timeline → assemble →
+preview.
+
 ## 2. Real AI video providers
 
 Configure one or more providers on the server. `FILM_VIDEO_PROVIDER` is the server default; a project may store its own provider choice (`scene_provider`), which the server validates against the configured list before any request. Keys never leave the server; no endpoint returns them, and no key is ever written to a provider handle or job payload.
@@ -261,6 +291,17 @@ All routes require an authenticated session and are mounted at `/api/films`.
 | POST | `/:id/scenes/:sceneId/generate` | Generate or regenerate **one** scene. |
 | GET | `/:id/scenes/:sceneId/clip` | Stream the real provider MP4 (range requests). |
 | GET | `/:id/scenes/:sceneId/poster` | Stream the poster frame. |
+| GET/POST | `/:id/storyboard` | Storyboard coverage / render missing or forced stills. |
+| GET | `/:id/storyboard/:frameId/image` | Stream a storyboard frame. |
+| POST | `/:id/poster` | Render key art from the logline and palette. |
+| GET | `/:id/poster/image` | Stream the rendered poster. |
+| POST | `/:id/characters/:characterId/concept` | Character concept art (sets the reference only for real AI art). |
+| GET/POST | `/:id/voice` | Voice-take overview / record missing or forced takes. |
+| GET | `/:id/scenes/:sceneId/voice` | Stream a scene's WAV take. |
+| GET/POST | `/flows`, `/flows/:flowId` | List/create and read/update/delete canvas flows. |
+| POST | `/flows/:flowId/run` | Execute a flow in dependency order. |
+| GET | `/flows/:flowId/artifact/:filename` | Stream a node's generated file. |
+| GET | `/models` | Live model readiness, limits and credit prices. |
 | POST | `/production/start` | Start a production from a brief (creates the project). |
 | GET | `/production` | List the caller's production runs and stage definitions. |
 | GET | `/:id/production` | Live stage board with scene counts, QC, credits and failures. |
@@ -288,9 +329,9 @@ All routes require an authenticated session and are mounted at `/api/films`.
 
 Routes (all under the existing authenticated `/app` shell, same brand, themes and navigation):
 
-`/app/films` hub · `/short` · `/long` · `/series` · `/agent` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|locations|scenes|render|preview`.
+`/app/films` hub · `/short` · `/long` · `/series` · `/agent` · `/canvas` · `/models` · `/scripts` · `/characters` · `/scenes` · `/audio` · `/editor` · `/projects` · `/media` · `/published` · `/credits` · `/project/:id?step=setup|write|cast|locations|storyboard|scenes|voice|timeline|render|preview`.
 
-The project workspace is a seven-step resumable wizard (setup, screenplay, cast, locations, direct & generate, assemble, preview). Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
+The project workspace is a ten-step resumable wizard (setup, screenplay, cast, locations, storyboard, direct & generate, voice, timeline, assemble, preview). Every step persists to the DB; closing the browser never loses progress. It polls safely while jobs run and shows real status, failed jobs, remaining credits and provider errors. Duration presets (1–60 min) display the exact clip plan and credit estimate before creation; the generation panel exposes start/pause/resume/cancel/retry with live per-scene progress and an ETA; the render panel shows segment count, temporary disk needs, sound-effect cues and the subtitle mode.
 
 ### Web, Android, iOS
 

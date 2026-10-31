@@ -41,7 +41,7 @@ const PROVIDER_LABELS = {
   veo: 'Google Veo (Gemini API)',
 };
 
-const PROVIDER_IDS = ['replicate', 'fal', 'veo'];
+export const PROVIDER_IDS = ['replicate', 'fal', 'veo'];
 
 function roots() {
   return {

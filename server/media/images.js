@@ -188,6 +188,54 @@ export function activeImageProvider() {
   throw new Error(`Unsupported IMAGE_PROVIDER "${requested}". Use procedural, openai, or replicate.`);
 }
 
+/**
+ * Live readiness of the configured image provider. `ai` distinguishes a real
+ * model from the built-in procedural renderer so callers never label a
+ * procedural image as AI output.
+ */
+export function imageProviderStatus() {
+  const requested = config.media.imageProvider;
+  const ai = requested === 'openai' || requested === 'replicate';
+  const configured = requested === 'procedural'
+    || (requested === 'openai' && Boolean(config.ai.openaiKey))
+    || (requested === 'replicate' && Boolean(config.media.replicateToken));
+  return { provider: requested, active: activeImageProvider(), ai, configured };
+}
+
+/**
+ * Generate one image from an arbitrary prompt. Used by the film storyboard and
+ * character concept studio. Falls back to the procedural renderer only when
+ * that is the configured provider — it never silently pretends to be AI.
+ */
+export async function generatePromptImage({
+  prompt, aspectRatio = '16:9', style = 'cinematic', seedKey = 'image', outputPath,
+}) {
+  const status = imageProviderStatus();
+  if (!status.configured) {
+    throw new Error(`IMAGE_PROVIDER=${status.provider} is selected but its credentials are missing. No image was generated.`);
+  }
+  const dims = dimensionsFor(aspectRatio);
+  const seed = seedNumber(seedKey);
+  let source;
+  if (config.media.imageProvider === 'openai') source = await openAiImage(prompt, aspectRatio);
+  else if (config.media.imageProvider === 'replicate') source = await replicateImage(prompt, aspectRatio);
+  else {
+    source = Buffer.from(proceduralSvg({
+      width: dims.width, height: dims.height, style, palette: stylePalette(style), seed,
+      index: 0, niche: 'storyboard', visualPrompt: prompt,
+    }), 'utf8');
+  }
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const info = await sharp(source)
+    .resize(dims.width, dims.height, { fit: 'cover', position: 'centre' })
+    .png({ compressionLevel: 9 })
+    .toFile(outputPath);
+  return {
+    path: outputPath, provider: status.active, ai: status.ai,
+    width: info.width, height: info.height,
+  };
+}
+
 export async function generateSceneImages({ projectId, plan, input, onProgress = async () => {} }) {
   const dir = await ensureProjectDir(projectId);
   const dims = dimensionsFor(input.aspectRatio);

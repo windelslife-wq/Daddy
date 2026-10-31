@@ -75,6 +75,8 @@ export const FILM_PAGES = [
   { path: '/app/films/long', label: 'Long Drama & Movie', icon: 'film' },
   { path: '/app/films/series', label: 'Series & Episodes', icon: 'layers' },
   { path: '/app/films/agent', label: 'AI Production Agent', icon: 'list-checks' },
+  { path: '/app/films/canvas', label: 'Creative Canvas', icon: 'workflow' },
+  { path: '/app/films/models', label: 'Models & Providers', icon: 'shield-check' },
   { path: '/app/films/scripts', label: 'AI Script Writer', icon: 'pen-line' },
   { path: '/app/films/characters', label: 'Character Studio', icon: 'users' },
   { path: '/app/films/scenes', label: 'Scene Generator', icon: 'wand-sparkles' },

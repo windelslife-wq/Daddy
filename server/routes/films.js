@@ -38,6 +38,14 @@ import {
 } from '../film/locations.js';
 import { filmQualityReport } from '../film/continuity.js';
 import {
+  storyboardOverview, generateStoryboard, generatePoster, generateCharacterConcept, ownedFrame,
+} from '../film/storyboard.js';
+import { voiceOverview, generateVoiceTakes, sceneTakePath } from '../film/voice.js';
+import {
+  createFlow, listFlows, updateFlow, deleteFlow, runFlow, ownedFlow, flowArtifact, flowView, NODE_TYPES,
+} from '../film/canvas.js';
+import { listModels } from '../film/models.js';
+import {
   startProduction, productionSnapshot, advanceProduction, cancelProduction,
   listProductions, PRODUCTION_STAGES,
 } from '../film/production.js';
@@ -164,6 +172,42 @@ export function filmRouter() {
   // ---- Production agent ----------------------------------------------------
   router.get('/production', h(async (req, res) => {
     res.json({ productions: await listProductions(req.user.id), stages: PRODUCTION_STAGES });
+  }));
+
+  // ---- Model marketplace (live readiness, no fake activation) --------------
+  router.get('/models', h(async (req, res) => {
+    res.json(listModels());
+  }));
+
+  // ---- Creative canvas -----------------------------------------------------
+  router.get('/flows', h(async (req, res) => {
+    res.json({ flows: await listFlows(req.user.id, { filmId: req.query.filmId }), nodeTypes: NODE_TYPES });
+  }));
+
+  router.post('/flows', h(async (req, res) => {
+    res.status(201).json({ flow: await createFlow(req.user.id, req.body || {}) });
+  }));
+
+  router.get('/flows/:flowId', h(async (req, res) => {
+    const flow = await ownedFlow(req.user.id, req.params.flowId);
+    res.json({ flow: flowView(flow), nodeTypes: NODE_TYPES });
+  }));
+
+  router.patch('/flows/:flowId', h(async (req, res) => {
+    res.json({ flow: await updateFlow(req.user.id, req.params.flowId, req.body || {}) });
+  }));
+
+  router.delete('/flows/:flowId', h(async (req, res) => {
+    res.json(await deleteFlow(req.user.id, req.params.flowId));
+  }));
+
+  router.post('/flows/:flowId/run', h(async (req, res) => {
+    res.json(await runFlow(req.user.id, req.params.flowId, { force: Boolean(req.body?.force) }));
+  }));
+
+  router.get('/flows/:flowId/artifact/:filename', h(async (req, res) => {
+    const filePath = await flowArtifact(req.user.id, req.params.flowId, req.params.filename);
+    await streamFile(req, res, filePath, path.basename(filePath));
   }));
 
   router.post('/production/start', h(async (req, res) => {
@@ -366,6 +410,49 @@ export function filmRouter() {
 
   router.post('/:id/production/cancel', h(async (req, res) => {
     res.json(await cancelProduction(req.user.id, req.params.id, req.user.role));
+  }));
+
+  // ---- Storyboard, poster and character concept art ------------------------
+  router.get('/:id/storyboard', h(async (req, res) => {
+    res.json(await storyboardOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/storyboard', h(async (req, res) => {
+    res.json(await generateStoryboard(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/storyboard/:frameId/image', h(async (req, res) => {
+    const frame = await ownedFrame(req.user.id, req.params.id, req.params.frameId, req.user.role);
+    if (!frame.path) throw notFound('This frame has no image.');
+    await streamFile(req, res, frame.path, path.basename(frame.path));
+  }));
+
+  router.post('/:id/poster', h(async (req, res) => {
+    res.json(await generatePoster(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.get('/:id/poster/image', h(async (req, res) => {
+    const film = await ownedFilm(req.user.id, req.params.id, req.user.role);
+    if (!film.poster_path) throw notFound('No poster has been rendered yet.');
+    await streamFile(req, res, film.poster_path, `poster-${req.params.id}.png`);
+  }));
+
+  router.post('/:id/characters/:characterId/concept', h(async (req, res) => {
+    res.json(await generateCharacterConcept(req.user.id, req.params.id, req.params.characterId, req.user.role));
+  }));
+
+  // ---- Voice takes ---------------------------------------------------------
+  router.get('/:id/voice', h(async (req, res) => {
+    res.json(await voiceOverview(req.user.id, req.params.id, req.user.role));
+  }));
+
+  router.post('/:id/voice', h(async (req, res) => {
+    res.json(await generateVoiceTakes(req.user.id, req.params.id, req.body || {}, req.user.role));
+  }));
+
+  router.get('/:id/scenes/:sceneId/voice', h(async (req, res) => {
+    const take = await sceneTakePath(req.user.id, req.params.id, req.params.sceneId, req.user.role);
+    await streamFile(req, res, take.path, take.filename);
   }));
 
   // ---- Quality control / continuity ---------------------------------------

@@ -150,6 +150,7 @@ export const config = {
     // scaled without touching code.
     maxSceneSeconds: envInt('FILM_MAX_SCENE_SECONDS', 10),
     minSceneSeconds: envInt('FILM_MIN_SCENE_SECONDS', 4),
+    transitionFadeSeconds: Math.max(0.1, Math.min(2, Number(env('FILM_TRANSITION_FADE_SECONDS', '0.5')) || 0.5)),
     // 720 scenes × 10s covers a 60-minute film (360 clips) with headroom for a
     // 2-hour cut. Raise together with FILM_MAX_PROJECT_SECONDS for longer films.
     maxScenes: envInt('FILM_MAX_SCENES', 720),

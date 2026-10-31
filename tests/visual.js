@@ -366,6 +366,93 @@ test('professional global website, themes, authentication, workspace, and respon
     await assertNoHorizontalOverflow('mobile film agent');
   });
 
+  await t.test('storyboard, voice, timeline, canvas and model pages work end to end', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const project = await page.evaluate(async () => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          type: 'short_drama', title: 'Visual panels test', genre: 'family_drama',
+          style: 'cinematic', aspectRatio: '9:16', targetPlatform: 'tiktok', targetDurationSeconds: 30,
+        }),
+      })).json();
+      await fetch(`/api/films/${created.film.id}/screenplay`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ idea: 'A sister finds a letter on a rooftop at dawn', allowTemplate: true }),
+      });
+      return created.film;
+    });
+    assert.ok(project?.id, 'project must be created through the API');
+
+    // 5. Storyboard — procedural stills are rendered and displayed.
+    await page.goto(`${base}/app/films/project/${project.id}?step=storyboard`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Render missing stills/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Render missing stills/i }).click();
+    await page.locator('.film-storyboard-card img').first().waitFor({ timeout: 45000 });
+    assert.ok(await page.locator('.film-storyboard-card').count() > 0, 'storyboard cards must render');
+    await screenshot('film-storyboard-desktop.png');
+    await assertNoHorizontalOverflow('film storyboard');
+
+    // 7. Voice — real local takes appear as playable audio.
+    await page.goto(`${base}/app/films/project/${project.id}?step=voice`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Record missing takes/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Record missing takes/i }).click();
+    await page.locator('audio').first().waitFor({ timeout: 45000 });
+    assert.ok(await page.locator('audio').count() > 0, 'voice takes must be playable');
+    await screenshot('film-voice-desktop.png');
+
+    // 8. Timeline — a transition is applied and persisted.
+    await page.goto(`${base}/app/films/project/${project.id}?step=timeline`, { waitUntil: 'networkidle' });
+    await page.locator('.film-timeline-controls select').first().waitFor({ timeout: 15000 });
+    await page.locator('.film-timeline-controls select').first().selectOption('fade_black');
+    await page.getByRole('button', { name: /^Apply$/ }).first().click();
+    await page.getByText(/applied to the next render/i).first().waitFor({ timeout: 15000 });
+    await screenshot('film-timeline-desktop.png');
+
+    // 4. Creative canvas — a real flow executes through the UI.
+    const flow = await page.evaluate(async (filmId) => {
+      const headers = { 'content-type': 'application/json' };
+      const created = await (await fetch('/api/films/flows', {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          name: 'Visual canvas', filmId,
+          graph: {
+            nodes: [
+              { id: 'brief', type: 'text', config: { text: 'A rooftop at dawn, a sister holding a letter.' } },
+              { id: 'frame', type: 'image', config: { aspectRatio: '9:16' } },
+              { id: 'line', type: 'voice', config: { voice: 'nova' } },
+            ],
+            edges: [{ from: 'brief', to: 'frame' }, { from: 'frame', to: 'line' }],
+          },
+        }),
+      })).json();
+      return created.flow;
+    }, project.id);
+    assert.ok(flow?.id, 'flow must be created through the API');
+    await page.goto(`${base}/app/films/canvas?flow=${flow.id}`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /Run flow/i }).waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /Run flow/i }).click();
+    await page.locator('.film-flow-result.done').first().waitFor({ timeout: 45000 });
+    await page.locator('.film-flow-node img').first().waitFor({ timeout: 15000 });
+    await page.locator('.film-flow-node audio').first().waitFor({ timeout: 15000 });
+    await screenshot('film-canvas-desktop.png');
+
+    // 12. Model registry — readiness comes from the server, no fake activation.
+    await page.goto(`${base}/app/films/models`, { waitUntil: 'networkidle' });
+    await page.getByText(/Needs a video key/i).first().waitFor({ timeout: 15000 });
+    await page.getByText(/Local stills/i).first().waitFor();
+    await page.getByText(/meSpeak \(local\)/i).first().waitFor();
+    await screenshot('film-models-desktop.png');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    for (const route of [`/app/films/project/${project.id}?step=storyboard`, `/app/films/project/${project.id}?step=voice`, `/app/films/project/${project.id}?step=timeline`, '/app/films/models']) {
+      await page.goto(base + route, { waitUntil: 'networkidle' });
+      await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 15000 });
+      await assertNoHorizontalOverflow(`mobile ${route}`);
+    }
+  });
+
   await t.test('mobile home, login, and dashboard have no horizontal overflow', async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     for (const route of ['/', '/login', '/signup', '/pricing', '/app']) {
