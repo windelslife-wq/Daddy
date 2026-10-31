@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import {
   Activity, AlertCircle, BarChart3, CheckCircle2, Clapperboard, Cpu, KeyRound, ListChecks, Mail,
-  RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
+  PlugZap, RefreshCw, Rocket, Send, Settings as SettingsIcon, ShieldCheck, Trash2, Users, Wallet,
 } from 'lucide-react';
 import { useLoad } from '../hooks.js';
 import { get, patch, post, put, formatDate, formatNumber } from '../api.js';
 import { Button, Card, EmptyState, ErrorBanner, Field, InfoBanner, KeyValue, Modal, PageHeader, Spinner, StatusBadge, Toggle, useToast } from '../components/ui.jsx';
+import ProviderSettings from './admin/ProviderSettings.jsx';
 
 const tabs = [
   { id: 'overview', label: 'Overview', icon: Activity },
+  { id: 'providers', label: 'Providers', icon: PlugZap },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'plans', label: 'Plans & limits', icon: Wallet },
   { id: 'settings', label: 'Global settings', icon: SettingsIcon },
@@ -52,6 +54,8 @@ export default function Admin() {
       film: '/api/admin/film/ops',
       logs: '/api/admin/audit-logs', messages: '/api/admin/contact-messages',
     };
+    // The Providers tab owns its own load: it edits a single configuration object.
+    if (!endpoints[tab]) return Promise.resolve(null);
     return get(endpoints[tab]);
   };
   const { data, loading, error, reload } = useLoad(loader, [tab], { refreshMs: tab === 'overview' || tab === 'jobs' ? 15000 : 0 });
@@ -165,7 +169,7 @@ export default function Admin() {
 
   return (
     <>
-      <PageHeader eyebrow="Administration" title="Admin control center" description="Manage users, plans, integrations, global settings, and background jobs." actions={<><Button variant="ghost" onClick={cleanup} disabled={busy}><Trash2 size={15} /> Cleanup</Button><Button variant="secondary" onClick={() => setBroadcastOpen(true)}><Send size={15} /> Broadcast</Button></>} />
+      <PageHeader eyebrow="Administration" title="Admin control center" description="Manage users, plans, provider credentials, integrations, global settings, and background jobs." actions={<><Button variant="ghost" onClick={cleanup} disabled={busy}><Trash2 size={15} /> Cleanup</Button><Button variant="secondary" onClick={() => setBroadcastOpen(true)}><Send size={15} /> Broadcast</Button></>} />
       <ErrorBanner error={error} onRetry={() => reload().catch(() => {})} />
       <div className="admin-grid">
         <div className="admin-side card" style={{ padding: 10 }}>
@@ -174,6 +178,7 @@ export default function Admin() {
         <div className="stack">
           {loading && !data ? <Card><Spinner label="Loading admin data…" /></Card> : (
             <>
+              {tab === 'providers' && <ProviderSettings />}
               {tab === 'overview' && data?.counts && (
                 <>
                   <div className="stat-grid">
@@ -238,7 +243,7 @@ export default function Admin() {
                   <div><h3>Official integration readiness</h3><div className="list">{Object.entries(data.providerStatus.integrations).map(([key, integration]) => <div className="integration-row" key={key}><strong>{integration.label}</strong><StatusBadge status={integration.configured ? 'connected' : 'needs_review'} label={integration.configured ? 'Configured' : 'Needs keys'} /></div>)}</div></div>
                   <div><h3>Required environment variables</h3><ul className="env-list">{Object.entries(data.requiredEnvironment || {}).map(([key, values]) => <li key={key}><strong>{key}</strong><br />{values.map((value) => <code key={value}>{value}</code>)}</li>)}</ul></div>
                 </div>
-                <InfoBanner icon={KeyRound}><strong>Secrets are environment-only.</strong><span> The admin panel can report status and toggle platform settings, but never reads or writes secret API keys.</span></InfoBanner>
+                <InfoBanner icon={KeyRound}><strong>Where credentials live.</strong><span> Provider keys are managed in the <strong>Providers</strong> tab: encrypted with <code>APP_ENCRYPTION_KEY</code>, write-only once saved, and falling back to these environment variables when not set there. Publishing scopes and app review stay environment-only because they are provider-console approvals, not application settings.</span></InfoBanner>
               </Card>}
               {tab === 'integrations' && data?.readiness && <>
                 <Card title="Deployment readiness" icon={ShieldCheck} subtitle={`Overall: ${data.readiness.overall}. ${data.readiness.note}`}>

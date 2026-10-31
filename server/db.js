@@ -310,6 +310,16 @@ export const tableDefinitions = {
     t.string('updated_at', 40).notNullable();
     t.string('updated_by', 48);
   },
+  // Provider configuration written by the Super Admin dashboard. Secrets inside
+  // `secrets` are AES-GCM ciphertext; the environment remains the fallback.
+  provider_config: (t) => {
+    t.string('id', 48).primary();
+    t.text('active').notNullable().defaultTo('{}');
+    t.text('models').notNullable().defaultTo('{}');
+    t.text('secrets').notNullable().defaultTo('{}');
+    t.string('updated_at', 40).notNullable();
+    t.string('updated_by', 48);
+  },
   audit_logs: (t) => {
     t.string('id', 48).primary();
     t.string('user_id', 48).index();

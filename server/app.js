@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, assertProductionSecrets } from './config.js';
+import { loadProviderConfig } from './providerConfig.js';
 import { initDb, logger } from './db.js';
 import { requestLogger } from './logger.js';
 import { authRouter, sameOriginGuard } from './auth.js';
@@ -47,6 +48,9 @@ function hmrSettings() {
 
 export async function createApp() {
   await initDb();
+  // Provider keys and selections saved in the Super Admin dashboard override the
+  // environment; load them before any router or worker reads provider status.
+  await loadProviderConfig();
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.security.trustProxy ? 1 : false);

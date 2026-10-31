@@ -199,29 +199,37 @@ export const config = {
   },
 };
 
-const configured = {
-  local: true,
-  procedural: true,
-  mespeak: true,
-  ffmpeg: true,
-  openai: Boolean(config.ai.openaiKey),
-  anthropic: Boolean(config.ai.anthropicKey),
-  gemini: Boolean(config.ai.geminiKey),
-  brave: Boolean(config.ai.researchApiKey),
-  tavily: Boolean(config.ai.researchApiKey),
-  openaiImages: Boolean(config.ai.openaiKey),
-  replicate: Boolean(config.media.replicateToken),
-  elevenlabs: Boolean(config.media.elevenLabsKey),
-  facebook: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
-  instagram: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
-  youtube: Boolean(config.oauth.googleClientId && config.oauth.googleClientSecret),
-  x: Boolean(config.oauth.xConsumerKey && config.oauth.xConsumerSecret),
-  stripe: Boolean(config.stripe.secret),
-  smtp: Boolean(config.notifications.smtpUrl),
-  publicMedia: config.publicBaseUrl.startsWith('https://'),
-};
+/**
+ * Credential presence is derived from the live config object on every call, not
+ * captured once at import: the Super Admin dashboard can change a provider key at
+ * runtime (see server/providerConfig.js) and status must follow immediately.
+ */
+function configuredProviders() {
+  return {
+    local: true,
+    procedural: true,
+    mespeak: true,
+    ffmpeg: true,
+    openai: Boolean(config.ai.openaiKey),
+    anthropic: Boolean(config.ai.anthropicKey),
+    gemini: Boolean(config.ai.geminiKey),
+    brave: Boolean(config.ai.researchApiKey),
+    tavily: Boolean(config.ai.researchApiKey),
+    openaiImages: Boolean(config.ai.openaiKey),
+    replicate: Boolean(config.media.replicateToken),
+    elevenlabs: Boolean(config.media.elevenLabsKey),
+    facebook: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+    instagram: Boolean(config.oauth.metaAppId && config.oauth.metaAppSecret),
+    youtube: Boolean(config.oauth.googleClientId && config.oauth.googleClientSecret),
+    x: Boolean(config.oauth.xConsumerKey && config.oauth.xConsumerSecret),
+    stripe: Boolean(config.stripe.secret),
+    smtp: Boolean(config.notifications.smtpUrl),
+    publicMedia: config.publicBaseUrl.startsWith('https://'),
+  };
+}
 
 export function providerStatus() {
+  const configured = configuredProviders();
   const p = config.ai.provider;
   return {
     appName: config.appName,

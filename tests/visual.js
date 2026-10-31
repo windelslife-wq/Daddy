@@ -82,8 +82,8 @@ before(async () => {
     SKIP_FRONTEND: 'false',
     SEED_DEMO: 'true',
     EXPOSE_DEMO_CREDENTIALS: 'true',
-    ADMIN_EMAIL: '',
-    ADMIN_PASSWORD: '',
+    ADMIN_EMAIL: 'visual-admin@filmclublens.local',
+    ADMIN_PASSWORD: 'VisualAdmin2026!',
     DEMO_EMAIL: 'visual@filmclublens.local',
     DEMO_PASSWORD: 'VisualQA2026!',
     PORT: String(port),
@@ -548,11 +548,56 @@ test('professional global website, themes, authentication, workspace, and respon
     await screenshot('dashboard-mobile.png', 390);
   });
 
+  await t.test('the Super Admin dashboard owns provider configuration', async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Creators must see no provider configuration at all.
+    await page.goto(`${base}/app/settings`, { waitUntil: 'networkidle' });
+    assert.doesNotMatch(await page.locator('.tabs').innerText(), /AI providers/i, 'creator Settings still lists providers');
+    assert.doesNotMatch(await page.locator('body').innerText(), /Provider status/i, 'creator Settings still renders provider status');
+
+    await context.clearCookies();
+    await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
+    await page.locator('input[type="email"]').fill(env.ADMIN_EMAIL);
+    await page.locator('input[type="password"]').fill(env.ADMIN_PASSWORD);
+    await page.getByRole('button', { name: /^Sign in$/ }).click();
+    await page.waitForURL('**/app', { timeout: 15000 });
+
+    await page.goto(`${base}/app/admin`, { waitUntil: 'networkidle' });
+    await page.locator('.admin-side button', { hasText: 'Providers' }).click();
+    await page.getByText(/Active providers/i).waitFor({ timeout: 15000 });
+    assert.equal(await page.locator('.provider-choice').count(), 5, 'every modality is configurable');
+    assert.equal(await page.locator('.provider-secret').count(), 8, 'every credential is listed');
+    assert.equal(await page.locator('.provider-models .field').count(), 10, 'model overrides are available');
+
+    // Selecting a provider whose credential does not exist must fail honestly.
+    await page.locator('.provider-choice').first().locator('select').selectOption('openai');
+    await page.locator('button', { hasText: 'Save changes' }).first().click();
+    await page.getByText(/cannot use OpenAI yet/i).waitFor({ timeout: 15000 });
+    assert.equal(await page.locator('.provider-choice').first().locator('select').inputValue(), 'openai');
+
+    // Nothing was persisted by the rejected save.
+    const status = await page.request.get(`${base}/api/meta/status`);
+    assert.equal((await status.json()).ai.active, 'local');
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('.admin-side button', { hasText: 'Providers' }).click();
+    await page.getByText(/Active providers/i).waitFor();
+    await assertNoHorizontalOverflow('admin providers');
+    await screenshot('admin-providers.png');
+  });
+
   await t.test('browser reports no uncaught page errors or unexpected failed requests', async () => {
     assert.deepEqual(pageErrors, []);
-    const expectedConsole = httpErrors.some((line) => /^503 .*\/production\/advance$/.test(line))
-      ? [/Failed to load resource: the server responded with a status of 503/i]
-      : [];
+    const expectedConsole = [
+      ...(httpErrors.some((line) => /^503 .*\/production\/advance$/.test(line))
+        ? [/Failed to load resource: the server responded with a status of 503/i]
+        : []),
+      // The provider-configuration test deliberately asks for a provider with no
+      // credential and expects the documented 400 rejection.
+      ...(httpErrors.some((line) => /^400 .*\/api\/admin\/providers$/.test(line))
+        ? [/Failed to load resource: the server responded with a status of 400/i]
+        : []),
+    ];
     const unexpectedConsoleErrors = consoleErrors.filter((message) => !/favicon\.ico|ERR_ABORTED/i.test(message)
       && !expectedConsole.some((pattern) => pattern.test(message)));
     assert.deepEqual(unexpectedConsoleErrors, [], `Unexpected console errors. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
@@ -560,7 +605,10 @@ test('professional global website, themes, authentication, workspace, and respon
     assert.deepEqual(unexpectedFailedRequests, [], `Unexpected failed requests. HTTP errors: ${httpErrors.join(' | ') || 'none'}`);
     // The production-agent test deliberately approves generation without a provider:
     // the server rejects that with a documented 503 instead of fabricating a clip.
-    const honestRejections = [/^503 .*\/production\/advance$/];
+    const honestRejections = [
+      /^503 .*\/production\/advance$/,
+      /^400 .*\/api\/admin\/providers$/,
+    ];
     const unexpectedHttpErrors = httpErrors.filter((line) => !honestRejections.some((pattern) => pattern.test(line)));
     assert.deepEqual(unexpectedHttpErrors, [], `Unexpected HTTP error responses: ${httpErrors.join(' | ')}`);
     console.log(JSON.stringify({

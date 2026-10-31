@@ -423,9 +423,10 @@ Log in as the seeded admin and open **Admin** to manage:
 - plan quotas and Stripe Price IDs;
 - global settings: signups, maintenance mode, review defaults, autopilot, retry limits, metrics interval, supported languages/platforms, content policy;
 - background jobs (retry/cancel), publishing failures, audit logs, and provider readiness;
-- in-app broadcast notifications and cleanup jobs.
+- in-app broadcast notifications and cleanup jobs;
+- **Providers**: choose the active AI, search, image, TTS and film-video providers, store their credentials, and override model ids — see [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
-Secrets remain environment-only; the admin UI cannot read or write API keys.
+Provider credentials are written only from the Super Admin dashboard. They are encrypted with `APP_ENCRYPTION_KEY`, are write-only once saved (the API returns presence, provenance and the last four characters, never the key), and fall back to the environment when cleared. Creators see no provider configuration at all; unavailable capabilities report themselves honestly in context. Publishing scopes, OAuth client secrets and app-review status remain environment/provider-console concerns.
 
 ---
 
